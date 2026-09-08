@@ -54,3 +54,10 @@ Table:
     - Look for matching auth → not found
     - Not found? don't crash, post directly to ledger as `FORCE_POST` type
     - No hold to release (there wasn't one)
+
+## [T+8h] HOLD:
+- This is the reserved money. Always compute - never store in DB.
+- Terminal states can go from `ACTIVE` to:
+    1. `RELEASED`
+    2. `EXPIRED`
+    3. `REVERSED`
