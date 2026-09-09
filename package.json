@@ -7,8 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test --experimental-default-type=module tests/*.test.mjs",
-    "seed": "node --env-file=.env scripts/seed.mjs"
+    "test": "node --test --experimental-test-isolation=none --experimental-default-type=module tests/*.test.mjs",
+    "seed": "node --env-file=.env scripts/seed.mjs",
+    "smoke": "node --env-file=.env --experimental-default-type=module scripts/smoke.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

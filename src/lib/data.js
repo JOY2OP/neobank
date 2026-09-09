@@ -2,6 +2,7 @@ import "server-only";
 
 import { DEMO_IDS } from "./demo-users";
 import { callRpc, isSupabaseConfigured, selectRows } from "./supabase";
+import { providerMode } from "./providers/config";
 
 function first(rows) {
   return Array.isArray(rows) ? rows[0] || null : rows;
@@ -136,4 +137,48 @@ export async function getStatement({ start, end, knownAt }) {
     p_period_end: end,
     p_known_at: knownAt,
   });
+}
+
+export async function getCoreLoopState() {
+  const [kybCases, kybEvents, businessEvents, banks, bankEvents, payments, paymentStatuses, cards, authorizations, settlements, settlementEvents, requests, runs, breaks] = await Promise.all([
+    selectRows("kyb_cases", `select=*&organization_id=eq.${DEMO_IDS.organization}&provider_code=eq.persona&order=created_at.desc`),
+    selectRows("kyb_events", "select=*&order=recorded_at.desc"),
+    selectRows("business_account_events", `select=*&business_account_id=eq.${DEMO_IDS.account}&event_type=eq.OPENED&order=recorded_at.desc`),
+    selectRows("external_bank_accounts", `select=*&organization_id=eq.${DEMO_IDS.organization}&provider_code=eq.plaid&order=created_at.desc`),
+    selectRows("external_bank_account_events", "select=*&order=recorded_at.desc"),
+    selectRows("payments", `select=*&business_account_id=eq.${DEMO_IDS.account}&order=created_at.desc`),
+    selectRows("current_payment_status", "select=*"),
+    selectRows("cards", `select=*&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.stripe&order=created_at.desc`),
+    selectRows("card_authorizations", "select=*&provider_code=eq.stripe&order=first_seen_at.desc"),
+    selectRows("card_settlements", "select=*&provider_code=eq.stripe&order=recorded_at.desc"),
+    selectRows("card_settlement_events", "select=*&event_type=eq.REVERSED&order=recorded_at.desc"),
+    selectRows("payment_request_status", `select=*&business_account_id=eq.${DEMO_IDS.account}&initiated_by_actor_id=eq.${DEMO_IDS.john}&order=created_at.desc`),
+    selectRows("reconciliation_runs", "select=*&provider_code=eq.stripe&order=started_at.desc"),
+    selectRows("latest_reconciliation_breaks", "select=*&order=age_days.desc"),
+  ]);
+  const caseIds = new Set(kybCases.map((item) => item.id));
+  const cardIds = new Set(cards.map((item) => item.id));
+  const auth = authorizations.find((item) => cardIds.has(item.card_id));
+  const settlement = settlements.find((item) => cardIds.has(item.card_id));
+  const reversedIds = new Set(settlementEvents.map((item) => item.settlement_id));
+  const outbound = payments.find((item) => item.direction === "OUTBOUND" && item.provider_code === "increase");
+  const paymentStatus = new Map(paymentStatuses.map((item) => [item.payment_id, item.status]));
+  const kyb = kybEvents.find((item) => caseIds.has(item.kyb_case_id)) || null;
+  return {
+    modes: Object.fromEntries(["persona", "plaid", "increase", "stripe"].map((name) => [name, providerMode(name)])),
+    kyb,
+    kybCase: kybCases[0] || null,
+    accountOpened: Boolean(kyb?.provider_event_id && businessEvents.some((item) => item.provider_event_id === kyb.provider_event_id)),
+    bank: banks[0] || null,
+    bankEvent: bankEvents.find((item) => item.external_bank_account_id === banks[0]?.id) || null,
+    funding: (() => { const item = payments.find((row) => row.direction === "INBOUND" && row.provider_code === "increase"); return item ? { ...item, status: paymentStatus.get(item.id) || "SUBMITTED" } : null; })(),
+    card: cards[0] || null,
+    authorization: auth || null,
+    settlement: settlement || null,
+    outboundRequest: requests[0] || null,
+    outbound: outbound ? { ...outbound, status: paymentStatus.get(outbound.id) || "SUBMITTED" } : null,
+    reversal: settlement && reversedIds.has(settlement.id),
+    reconciliation: runs[0] || null,
+    breaks,
+  };
 }

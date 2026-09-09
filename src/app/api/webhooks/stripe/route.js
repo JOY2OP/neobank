@@ -20,6 +20,7 @@ async function processStripeEvent(event, providerEventId) {
     let eventType = object.approved ? "AUTHORIZED" : "DECLINED";
     if (object.status === "reversed") eventType = "REVERSED";
     if (object.status === "closed" && !object.transactions?.length) eventType = "EXPIRED";
+    if (object.status === "closed" && object.transactions?.length) return;
     await callRpc("record_authorization_event", {
       p_provider_code: "stripe",
       p_provider_authorization_id: object.id,
@@ -27,7 +28,7 @@ async function processStripeEvent(event, providerEventId) {
       p_event_type: eventType,
       p_authorized_total_cents: ["AUTHORIZED", "INCREMENTED"].includes(eventType) ? Math.abs(object.amount) : null,
       p_occurred_at: new Date(object.created * 1000).toISOString(),
-      p_idempotency_key: `stripe:${event.id}`,
+      p_idempotency_key: `stripe:authorization:${object.id}:${eventType}:${Math.abs(object.amount || 0)}`,
       p_provider_event_id: providerEventId,
       p_merchant_name: object.merchant_data?.name || null,
       p_merchant_category_code: object.merchant_data?.category_code || null,
@@ -52,7 +53,7 @@ async function processStripeEvent(event, providerEventId) {
         p_occurred_at: new Date(object.created * 1000).toISOString(),
         p_explicit_force_post: !authorizationId,
         p_is_final_capture: true,
-        p_idempotency_key: `stripe:${event.id}`,
+        p_idempotency_key: `stripe:transaction:${object.id}`,
         p_provider_event_id: providerEventId,
       });
     } else if (object.type === "refund" && authorizationId) {
@@ -63,7 +64,7 @@ async function processStripeEvent(event, providerEventId) {
       if (!settlements[0]) throw new Error("Refund arrived before its original settlement.");
       await callRpc("reverse_card_settlement", {
         p_settlement_id: settlements[0].id,
-        p_idempotency_key: `stripe:${event.id}`,
+        p_idempotency_key: `stripe:refund:${object.id}`,
         p_value_date: settlements[0].value_date,
         p_reason: "Stripe Issuing refund",
         p_provider_event_id: providerEventId,

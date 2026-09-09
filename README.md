@@ -12,6 +12,10 @@ No deployment is included.
 4. Run `npm run seed`. It is append-only and safe to repeat.
 5. Run `npm run dev`, then open `http://localhost:3000/login`.
 
+After signing in, open `/core-loop`. It is the canonical seven-step journey and
+only marks a provider step complete when its real sandbox record exists; seeded
+simulator fixtures are deliberately ignored.
+
 The seed prints actor IDs, the business account ID, balances, and useful demo URLs. It creates Acme Inc., cards, initial funding, a pending approval, card history, a current hold, standing orders, an NSF retry, provider evidence, and all three reconciliation cases.
 
 Use these dropdown identities:
@@ -32,7 +36,7 @@ All four providers default to `sandbox`. Missing sandbox credentials produce a c
 - Demo security: `DEMO_SESSION_SECRET`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`
 - Persona: mode, API key, template ID, webhook secret
 - Plaid: mode, client ID, sandbox secret, environment
-- Stripe: mode, test secret key, webhook secret
+- Stripe: mode, test Financial Account ID, test secret key, webhook secret
 - Increase: mode, sandbox API key/base URL/account ID/webhook secret
 
 Only use sandbox identities and money. Do not enter real PII, PANs, or CVCs. The Plaid access token is written through a server-only SQL function into the private schema. Customer-visible rows retain masked details and opaque provider IDs.
@@ -96,5 +100,7 @@ npm test
 npm run lint
 npm run build
 ```
+
+With the local server running, `npm run smoke` verifies that all 13 authenticated customer and Ops pages finish rendering seeded data.
 
 Database/provider integration tests require an applied Supabase schema and sandbox credentials. The Ops Demo Lab covers authorization, `$73.40` over-capture, reversal, settlement-before-auth, force post, duplicate webhook, ACH return, provider delay, standing-order execution, and NSF retry.

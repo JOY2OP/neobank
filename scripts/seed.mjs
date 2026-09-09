@@ -40,8 +40,9 @@ async function request(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-function insert(table, rows) {
-  return request(table, {
+function insert(table, rows, onConflict = "id") {
+  const conflictTarget = encodeURIComponent(onConflict);
+  return request(`${table}?on_conflict=${conflictTarget}`, {
     method: "POST",
     headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
     body: JSON.stringify(rows),
@@ -73,8 +74,8 @@ await insert("organization_memberships", [
   { organization_id: ids.organization, actor_id: ids.sarah, role: "OWNER" },
   { organization_id: ids.organization, actor_id: ids.john, role: "MAKER" },
   { organization_id: ids.organization, actor_id: ids.system, role: "MAKER" },
-]);
-await insert("organization_settings", [{ organization_id: ids.organization, approval_threshold_cents: 100000 }]);
+], "organization_id,actor_id");
+await insert("organization_settings", [{ organization_id: ids.organization, approval_threshold_cents: 100000 }], "organization_id");
 
 await insert("kyb_cases", [{ id: ids.kybCase, organization_id: ids.organization, provider_code: "simulator", external_case_id: "kyb_seed_acme" }]);
 await insert("kyb_events", [{
@@ -84,7 +85,7 @@ await insert("kyb_events", [{
   provider_status: "approved",
   occurred_at: now.toISOString(),
   details: { source: "SIMULATED", note: "Use Persona sandbox for the live inquiry." },
-}]);
+}], "idempotency_key");
 await insert("business_accounts", [{ id: ids.account, organization_id: ids.organization, account_name: "Operating account" }]);
 await insert("business_account_events", [{
   business_account_id: ids.account,
@@ -93,13 +94,31 @@ await insert("business_account_events", [{
   event_type: "OPENED",
   occurred_at: now.toISOString(),
   details: { source: "SEED" },
-}]);
+}], "idempotency_key");
 
-await insert("ledger_accounts", [
-  { id: ids.customerLedger, external_key: "ACME:CUSTOMER_DEPOSIT", organization_id: ids.organization, business_account_id: ids.account, account_class: "LIABILITY", purpose: "CUSTOMER_DEPOSIT", name: "Acme customer deposits", is_primary: true },
-  { id: ids.achClearing, external_key: "PLATFORM:ACH_CLEARING", rail_code: "ACH", account_class: "ASSET", purpose: "RAIL_CLEARING", name: "ACH clearing" },
-  { id: ids.cardPayable, external_key: "PLATFORM:SIMULATOR_CARD_PAYABLE", provider_code: "simulator", account_class: "LIABILITY", purpose: "CARD_PAYABLE", name: "Simulator card payable" },
-]);
+ids.customerLedger = await rpc("create_ledger_account", {
+  p_external_key: "ACME:CUSTOMER_DEPOSIT",
+  p_account_class: "LIABILITY",
+  p_purpose: "CUSTOMER_DEPOSIT",
+  p_name: "Acme customer deposits",
+  p_organization_id: ids.organization,
+  p_business_account_id: ids.account,
+  p_is_primary: true,
+});
+ids.achClearing = await rpc("create_ledger_account", {
+  p_external_key: "PLATFORM:ACH_CLEARING",
+  p_account_class: "ASSET",
+  p_purpose: "RAIL_CLEARING",
+  p_name: "ACH clearing",
+  p_rail_code: "ACH",
+});
+ids.cardPayable = await rpc("create_ledger_account", {
+  p_external_key: "PLATFORM:SIMULATOR_CARD_NETWORK_PAYABLE",
+  p_account_class: "LIABILITY",
+  p_purpose: "CARD_NETWORK_PAYABLE",
+  p_name: "Simulator card payable",
+  p_provider_code: "simulator",
+});
 await rpc("post_journal_entry", {
   p_posting_key: "seed:initial-funding",
   p_entry_kind: "ACH_SETTLEMENT",
@@ -115,7 +134,7 @@ await rpc("post_journal_entry", {
 });
 
 await insert("external_bank_accounts", [{ id: ids.bank, organization_id: ids.organization, provider_code: "simulator", provider_account_id: "plaid_seed_account", institution_name: "Chase", account_name: "Business Complete Banking", account_mask: "4821" }]);
-await insert("external_bank_account_events", [{ external_bank_account_id: ids.bank, idempotency_key: "seed:bank-linked", event_type: "VERIFIED", occurred_at: now.toISOString(), details: { source: "SIMULATED", increase_external_account_id: "external_account_seed" } }]);
+await insert("external_bank_account_events", [{ external_bank_account_id: ids.bank, idempotency_key: "seed:bank-linked", event_type: "VERIFIED", occurred_at: now.toISOString(), details: { source: "SIMULATED", increase_external_account_id: "external_account_seed" } }], "idempotency_key");
 await insert("cards", [
   { id: ids.sarahCard, business_account_id: ids.account, cardholder_actor_id: ids.sarah, provider_code: "simulator", provider_card_id: "card_seed_sarah", last4: "1048" },
   { id: ids.johnCard, business_account_id: ids.account, cardholder_actor_id: ids.john, provider_code: "simulator", provider_card_id: "card_seed_john", last4: "8842" },
@@ -123,7 +142,7 @@ await insert("cards", [
 await insert("card_events", [
   { card_id: ids.sarahCard, actor_id: ids.sarah, idempotency_key: "seed:sarah-card-active", event_type: "ACTIVATED", occurred_at: now.toISOString(), details: { source: "SIMULATED" } },
   { card_id: ids.johnCard, actor_id: ids.sarah, idempotency_key: "seed:john-card-active", event_type: "ACTIVATED", occurred_at: now.toISOString(), details: { source: "SIMULATED" } },
-]);
+], "idempotency_key");
 await insert("beneficiaries", [{ id: ids.beneficiary, organization_id: ids.organization, rail_code: "ACH", display_name: "Northstar Office Supply", provider_recipient_reference: "external_account_seed_vendor", account_mask: "0194" }]);
 
 // Seed the exact auth -> over-capture -> correction path used in the debrief.
@@ -142,7 +161,7 @@ await insert("standing_orders", [
 await insert("standing_order_events", [
   { standing_order_id: ids.activeOrder, actor_id: ids.sarah, idempotency_key: "seed:active-order", event_type: "CREATED", occurred_at: now.toISOString(), details: { name: "Monthly software bill" } },
   { standing_order_id: ids.retryOrder, actor_id: ids.john, idempotency_key: "seed:retry-order", event_type: "CREATED", occurred_at: now.toISOString(), details: { name: "Large vendor payment" } },
-]);
+], "idempotency_key");
 const occurrence = await rpc("create_standing_order_occurrence", { p_standing_order_id: ids.retryOrder, p_scheduled_for: retryOccurrenceDate, p_idempotency_key: `seed:retry-occurrence:${retryOccurrenceDate}` });
 const occurrenceId = occurrence[0].occurrence_id;
 for (const type of ["STARTED", "INSUFFICIENT_FUNDS"]) {
@@ -160,6 +179,36 @@ const reconciliationRows = [
 await rpc("run_scheme_reconciliation", { p_provider_code: "simulator", p_settlement_date: historyDate, p_file_reference: "seed-scheme-file.csv", p_file_hash: createHash("sha256").update(JSON.stringify(reconciliationRows)).digest("hex"), p_rows: reconciliationRows });
 
 const balances = await request(`business_account_balances?business_account_id=eq.${ids.account}`);
+const [kybStatus, accountStatus, cardStatuses, activeHoldAuthorizations, paymentRequests, reconciliationBreaks, standingOrderAttempts] = await Promise.all([
+  request(`current_kyb_status?organization_id=eq.${ids.organization}`),
+  request(`current_business_account_status?business_account_id=eq.${ids.account}`),
+  request(`current_card_status?card_id=in.(${ids.sarahCard},${ids.johnCard})`),
+  request("card_authorizations?provider_code=eq.simulator&provider_authorization_id=eq.auth_seed_active_hold&select=id,card_hold_events(delta_cents,is_terminal)"),
+  request("payment_request_status?idempotency_key=eq.seed%3Apending-payment"),
+  request("latest_reconciliation_breaks?select=break_type"),
+  request(`standing_order_attempt_events?occurrence_id=eq.${occurrenceId}`),
+]);
+
+const activeHoldCents = activeHoldAuthorizations[0]?.card_hold_events
+  ?.filter((event) => !event.is_terminal)
+  .reduce((sum, event) => sum + Number(event.delta_cents), 0);
+const expectedBreakTypes = new Set(reconciliationBreaks.map((item) => item.break_type));
+const expectedAttemptTypes = new Set(standingOrderAttempts.map((item) => item.event_type));
+const checks = {
+  "KYB approved": kybStatus[0]?.status === "APPROVED",
+  "Account opened": accountStatus[0]?.status === "OPENED",
+  "Two active cards": cardStatuses.filter((item) => item.status === "ACTIVATED").length === 2,
+  "$50 active hold": activeHoldCents === 5000,
+  "Maker-checker queued": paymentRequests[0]?.status === "PENDING_APPROVAL",
+  "Three reconciliation cases": ["IN_FILE_NOT_LEDGER", "IN_LEDGER_NOT_FILE", "AMOUNT_MISMATCH"].every((type) => expectedBreakTypes.has(type)),
+  "NSF retry scheduled": ["STARTED", "INSUFFICIENT_FUNDS", "RETRY_SCHEDULED"].every((type) => expectedAttemptTypes.has(type)),
+};
+const failedChecks = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name);
+if (failedChecks.length) {
+  throw new Error(`Seed verification failed: ${failedChecks.join(", ")}`);
+}
+
 console.log("Seed complete and safe to run again.");
 console.table({ Sarah: ids.sarah, John: ids.john, Ops: ids.ops, Account: ids.account, "Ledger cents": balances[0]?.ledger_balance_cents, "Available cents": balances[0]?.available_balance_cents });
+console.log(`Verified ${Object.keys(checks).length} core-loop fixtures.`);
 console.log("Demo URLs: /login, /app, /app/approvals, /ops/demo-lab");

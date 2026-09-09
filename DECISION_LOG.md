@@ -101,3 +101,8 @@ Table:
 ## [T+22h] SETTING UP
 - setting up credentials for the services for both local and prod
 - using ngrok for localhost webhook
+
+## [T+24h] Persona KYB is sales gated, going with simulated env
+
+## [T+25h] Stripe `treasury card` feature shows "We're setting up your account. We'll email you when it's ready" error. 
+- Going with simulated with this one too.

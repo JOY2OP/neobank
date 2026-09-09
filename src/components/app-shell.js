@@ -6,6 +6,7 @@ import { logoutAction } from "@/app/actions";
 import { Brand } from "./ui";
 
 const customerLinks = [
+  ["/core-loop", "Core loop", "1â†’7"],
   ["/app", "Overview", "⌂"],
   ["/app/payments", "Payments", "↗"],
   ["/app/cards", "Cards", "▣"],
@@ -16,6 +17,7 @@ const ownerLinks = [
   ["/app/approvals", "Approvals", "✓"],
 ];
 const opsLinks = [
+  ["/core-loop", "Core loop", "1â†’7"],
   ["/ops", "Operations", "⌂"],
   ["/ops/reconciliation", "Reconciliation", "≋"],
   ["/ops/statements", "Statements", "▤"],

@@ -15,6 +15,7 @@ export function ActionForm({ action, submitLabel, children, className = "form-ca
       {children}
       {state?.error ? <p className="form-message error" role="alert">{state.error}</p> : null}
       {state?.message ? <p className="form-message success" role="status">{state.message}</p> : null}
+      {state?.url ? <a className="button button-secondary" href={state.url}>Continue in provider sandbox</a> : null}
       <SubmitButton>{submitLabel}</SubmitButton>
     </form>
   );

@@ -132,10 +132,26 @@ label { display: grid; gap: 7px; color: #514c48; font-size: 12px; font-weight: 7
 input, select, textarea { width: 100%; min-height: 45px; padding: 10px 12px; color: var(--ink); background: white; border: 1px solid #d9d1cc; border-radius: 10px; outline: none; }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(255, 90, 0, .11); }
+.checkbox-label { display: flex; align-items: flex-start; gap: 9px; font-weight: 600; line-height: 1.45; }
+.checkbox-label input { width: 16px; min-height: 16px; margin: 1px 0 0; accent-color: var(--orange); }
 .button { min-height: 43px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 17px; border: 1px solid transparent; border-radius: 10px; cursor: pointer; font-weight: 750; font-size: 13px; }
 .button:disabled { opacity: .55; cursor: wait; }
 .button-primary { color: white; background: var(--orange); }
 .button-primary:hover:not(:disabled) { background: #e84f00; }
+.button-secondary { color: var(--orange-dark); background: #fff7f2; border-color: #ffd5bd; text-decoration: none; }
+.button-secondary:hover { background: #ffeadf; }
+
+.core-loop-list { display: grid; gap: 14px; margin-top: 22px; }
+.core-step { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 16px; padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); }
+.core-step-done { border-color: #bfe7d8; background: #fbfffd; }
+.core-step-number { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--orange); font-weight: 850; }
+.core-step-done .core-step-number { background: var(--green); }
+.core-step-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.core-step-head h2 { margin: 0; font-size: 18px; }
+.core-step-body > p { margin: 7px 0 14px; color: var(--muted); }
+.core-action { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.core-action .form-message { flex-basis: 100%; margin: 0; }
+.core-instruction { padding: 10px 12px; border-radius: 9px; background: var(--cream); color: var(--ink) !important; font-weight: 650; }
 .form-help, .form-message { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .form-message.error { color: var(--red); }
 .form-message.success { color: var(--green); }

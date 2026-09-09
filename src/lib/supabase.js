@@ -46,6 +46,14 @@ export function insertRows(table, rows, { ignoreDuplicates = false } = {}) {
   });
 }
 
+export function updateRows(table, query, values) {
+  return request(`${table}?${query}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(values),
+  });
+}
+
 export function callRpc(name, parameters = {}) {
   return request(`rpc/${name}`, {
     method: "POST",
