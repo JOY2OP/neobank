@@ -7,7 +7,7 @@ Ship one explainable USD business-account journey:
 1. Sign in as one of the seeded demo roles.
 2. Show KYB as an account-opening gate. Persona remains honestly simulated because its sandbox is sales-gated.
 3. Link a sandbox bank with Plaid and fund the account over Increase.
-4. Issue a standalone Stripe Issuing sandbox card, then demonstrate authorization, a different settlement amount, and a reversal. Treasury and Financial Accounts are outside this slice.
+4. Issue a Lithic sandbox card, then demonstrate authorization, a different clearing amount, and a return.
 5. Have John create an above-threshold ACH and Sarah approve it. John cannot approve his own request.
 6. Show the reversal on the original value date and at two different knowledge cutoffs.
 7. Reconcile a processor file and surface all three break types.
@@ -20,7 +20,7 @@ The “core loop” is this demo script, not a customer product area. It may rem
 - Immutable double-entry ledger with balances derived from journal postings.
 - Active card holds and payment reservations derived from append-only events.
 - Idempotent, signature-verified webhooks and visible provider failure/delay states.
-- Two genuinely live sandbox integrations. Stripe Issuing is the highest-value card integration; Plaid and Increase cover bank linking and ACH.
+- Two genuinely live sandbox integrations. Lithic is the card integration; Plaid and Increase cover bank linking and ACH.
 - Card hostile-sequencing cases: different-amount capture, reversal, force post, settlement-before-authorization, and duplicate delivery.
 - Maker-checker enforcement and ACH return/recall behavior.
 - Bitemporal statement viewer and reconciliation breaks screen.

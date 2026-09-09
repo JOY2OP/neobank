@@ -39,7 +39,7 @@ create table public.payment_rails (
 
 -- Reference/configuration rows, not demo customer data.
 insert into public.providers (code, display_name) values
-  ('stripe', 'Stripe'),
+  ('lithic', 'Lithic'),
   ('persona', 'Persona'),
   ('plaid', 'Plaid'),
   ('increase', 'Increase'),

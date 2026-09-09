@@ -2,7 +2,7 @@
 
 ## Summary
 
-Build the core neobank demo in straightforward JavaScript, prioritizing readable control flow over abstraction. Use one dropdown login for Sarah, John, and Ops, backed by the existing Supabase ledger. Persona, Plaid, Stripe, and Increase use sandbox by default; simulation is an explicit per-provider choice.
+Build the core neobank demo in straightforward JavaScript, prioritizing readable control flow over abstraction. Use one dropdown login for Sarah, John, and Ops, backed by the existing Supabase ledger. Persona, Plaid, Lithic, and Increase use sandbox by default; simulation is an explicit per-provider choice.
 
 The code should be explainable file-by-file by a beginner: small named functions, shallow call chains, descriptive variables, concise comments at important financial and integration boundaries, and no generic provider framework.
 
@@ -12,7 +12,7 @@ The code should be explainable file-by-file by a beginner: small named functions
 - Use Next.js App Router Server Components for data display and small client components for dropdowns, forms, dialogs, and Plaid Link.
 - Avoid dependency injection, factories, generic repositories, class hierarchies, metaprogramming, and overly reusable component systems.
 - Prefer concrete service modules with obvious exports:
-  - `stripe.js`: issue card, simulate authorization/capture/refund, verify webhook.
+  - `lithic.js`: issue card and simulate authorization/clearing/return.
   - `plaid.js`: create Link token, exchange token, retrieve bank details, verify webhook.
   - `persona.js`: create inquiry and verify webhook.
   - `increase.js`: create external account, submit ACH, retrieve event, simulate settlement/return.
@@ -69,10 +69,10 @@ The code should be explainable file-by-file by a beginner: small named functions
 - Persona creates a sandbox inquiry; signed webhook events advance KYB and open the account. [Persona webhook guidance](https://docs.withpersona.com/quickstart-webhooks)
 - Plaid creates a Link token, exchanges the public token, retrieves Auth details, and saves only masked account data outside the server-only token store. [Plaid Link flow](https://plaid.com/docs/quickstart/) and [webhook verification](https://plaid.com/docs/api/webhooks/webhook-verification/)
 - Increase receives the Plaid-derived sandbox routing/account details, creates an external account, and submits ACH transfers after internal approval. Signed events update submission, settlement, failure, and return states. [Increase ACH sandbox](https://www.increase.com/documentation/api/ach-transfers) and [webhook verification](https://www.increase.com/documentation/webhooks)
-- Stripe creates cardholders and virtual cards. Signed authorization and transaction events call the existing hold/settlement SQL functions. Test helpers support the `$50.00` authorization, `$73.40` capture, force post, and refund. [Stripe Issuing tests](https://docs.stripe.com/issuing/testing) and [webhook verification](https://docs.stripe.com/webhooks)
+- Lithic creates virtual cards. Signed `card_transaction.updated` events call the existing hold/settlement SQL functions. Its sandbox simulator supports the `$50.00` authorization, `$73.40` clearing, force post, and return. [Lithic transaction simulation](https://docs.lithic.com/docs/simulating-transactions) and [webhooks](https://docs.lithic.com/docs/events-api)
 - Simulator events pass through the same provider inbox and ledger functions as real webhooks; they are always visibly labeled `SIMULATED`.
 - Webhook routes:
-  - `POST /api/webhooks/stripe`
+  - `POST /api/webhooks/lithic`
   - `POST /api/webhooks/persona`
   - `POST /api/webhooks/plaid`
   - `POST /api/webhooks/increase`
@@ -88,7 +88,7 @@ The code should be explainable file-by-file by a beginner: small named functions
   - Statement viewer with date range and `knowledge_cutoff`.
   - Provider event log with delivery/processing status.
   - Demo Lab controls for authorization, over-capture, reversal, settlement-before-auth, force post, duplicate webhook, ACH return, and provider delay.
-- Real Stripe events demonstrate the live integration. Clearly labeled simulated, backdated events demonstrate the multi-day and bitemporal cases honestly.
+- Real Lithic events demonstrate the live card integration. Clearly labeled simulated, backdated events demonstrate the multi-day and bitemporal cases honestly.
 
 ## Environment and Documentation
 

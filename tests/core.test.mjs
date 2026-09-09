@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import Lithic from "lithic";
 import { increasePaymentEventKey, increasePaymentEventType, increasePaymentValueDate } from "../src/lib/increase-transfer-state.js";
 import { dollarsToCents, formatUsd } from "../src/lib/money.js";
-import { verifyIncreaseSignature, verifyPersonaSignature, verifyStripeSignature } from "../src/lib/hmac-signatures.js";
+import { verifyIncreaseSignature, verifyPersonaSignature } from "../src/lib/hmac-signatures.js";
 import { createSignedSessionValue, readSignedSessionSlug } from "../src/lib/session-signature.js";
 
 test("USD input becomes integer cents", () => {
@@ -30,9 +31,8 @@ test("provider HMAC checks accept current signatures and reject stale ones", () 
   const body = '{"id":"event_test"}';
   const secret = "webhook-secret";
   const now = Math.floor(Date.now() / 1000);
-  const stripe = createHmac("sha256", secret).update(`${now}.${body}`).digest("hex");
-  assert.equal(verifyStripeSignature(body, `t=${now},v1=${stripe}`, secret), true);
-  assert.equal(verifyPersonaSignature(body, `t=${now},v1=${stripe}`, secret), true);
+  const persona = createHmac("sha256", secret).update(`${now}.${body}`).digest("hex");
+  assert.equal(verifyPersonaSignature(body, `t=${now},v1=${persona}`, secret), true);
 
   const increase = createHmac("sha256", secret).update(`event_test.${now}.${body}`).digest("base64");
   const headers = new Headers({
@@ -41,7 +41,34 @@ test("provider HMAC checks accept current signatures and reject stale ones", () 
     "webhook-signature": `v1,${increase}`,
   });
   assert.equal(verifyIncreaseSignature(body, headers, secret), true);
-  assert.equal(verifyStripeSignature(body, `t=${now - 301},v1=${stripe}`, secret), false);
+  assert.equal(verifyPersonaSignature(body, `t=${now - 301},v1=${persona}`, secret), false);
+});
+
+test("Lithic webhook signatures are verified against the untouched body", () => {
+  const body = '{"event_type":"card_transaction.updated","token":"transaction_test"}';
+  const id = "event_lithic_test";
+  const now = Math.floor(Date.now() / 1000);
+  const key = Buffer.from("lithic-webhook-test-key");
+  const secret = `whsec_${key.toString("base64")}`;
+  const signature = createHmac("sha256", key).update(`${id}.${now}.${body}`).digest("base64");
+  const client = new Lithic({ apiKey: "sandbox-test-key", environment: "sandbox" });
+  const parsed = client.webhooks.parse(body, {
+    secret,
+    headers: {
+      "webhook-id": id,
+      "webhook-timestamp": String(now),
+      "webhook-signature": `v1,${signature}`,
+    },
+  });
+  assert.equal(parsed.event_type, "card_transaction.updated");
+  assert.throws(() => client.webhooks.parse(`${body} `, {
+    secret,
+    headers: {
+      "webhook-id": id,
+      "webhook-timestamp": String(now),
+      "webhook-signature": `v1,${signature}`,
+    },
+  }));
 });
 
 test("Increase settlement is detected from the settlement timestamp", () => {

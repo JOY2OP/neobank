@@ -13,8 +13,8 @@ export async function getCustomerDashboard(user) {
 
   try {
     const cardFilter = user.role === "OWNER"
-      ? `business_account_id=eq.${DEMO_IDS.account}`
-      : `cardholder_actor_id=eq.${user.actorId}`;
+      ? `business_account_id=eq.${DEMO_IDS.account}&provider_code=in.(lithic,simulator)`
+      : `cardholder_actor_id=eq.${user.actorId}&provider_code=in.(lithic,simulator)`;
     const requestFilter = user.role === "OWNER"
       ? `business_account_id=eq.${DEMO_IDS.account}`
       : `initiated_by_actor_id=eq.${user.actorId}`;
@@ -173,13 +173,13 @@ export async function getCoreLoopState() {
     selectRows("external_bank_account_events", "select=*&order=recorded_at.desc"),
     selectRows("payments", `select=*&business_account_id=eq.${DEMO_IDS.account}&order=created_at.desc`),
     selectRows("current_payment_status", "select=*"),
-    selectRows("cards", `select=*&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.stripe&order=created_at.desc`),
-    selectRows("card_authorizations", "select=*&provider_code=eq.stripe&order=first_seen_at.desc"),
+    selectRows("cards", `select=*&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.lithic&order=created_at.desc`),
+    selectRows("card_authorizations", "select=*&provider_code=eq.lithic&order=first_seen_at.desc"),
     selectRows("active_card_holds", `select=*&business_account_id=eq.${DEMO_IDS.account}&order=last_recorded_at.desc`),
-    selectRows("card_settlements", "select=*&provider_code=eq.stripe&order=recorded_at.desc"),
+    selectRows("card_settlements", "select=*&provider_code=eq.lithic&order=recorded_at.desc"),
     selectRows("card_settlement_events", "select=*&event_type=eq.REVERSED&order=recorded_at.desc"),
     selectRows("payment_request_status", `select=*&business_account_id=eq.${DEMO_IDS.account}&initiated_by_actor_id=eq.${DEMO_IDS.john}&order=created_at.desc`),
-    selectRows("reconciliation_runs", "select=*&provider_code=eq.stripe&order=started_at.desc"),
+    selectRows("reconciliation_runs", "select=*&provider_code=eq.lithic&order=started_at.desc"),
     selectRows("latest_reconciliation_breaks", "select=*&order=age_days.desc"),
   ]);
   const caseIds = new Set(kybCases.map((item) => item.id));
@@ -192,7 +192,7 @@ export async function getCoreLoopState() {
   const paymentStatus = new Map(paymentStatuses.map((item) => [item.payment_id, item.status]));
   const kyb = kybEvents.find((item) => caseIds.has(item.kyb_case_id)) || null;
   return {
-    modes: Object.fromEntries(["persona", "plaid", "increase", "stripe"].map((name) => [name, providerMode(name)])),
+    modes: Object.fromEntries(["persona", "plaid", "increase", "lithic"].map((name) => [name, providerMode(name)])),
     kyb,
     kybCase: kybCases[0] || null,
     accountOpened: Boolean(kyb?.provider_event_id && businessEvents.some((item) => item.provider_event_id === kyb.provider_event_id)),

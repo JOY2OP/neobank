@@ -2,14 +2,13 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DEMO_IDS, getDemoUser } from "@/lib/demo-users";
 import { recordIncreaseAchTransfer } from "@/lib/increase-events";
 import { dollarsToCents } from "@/lib/money";
 import { newIdempotencyKey, submitPaymentRequest } from "@/lib/payments";
 import { startPersonaInquiry } from "@/lib/providers/persona";
-import { captureStripeAuthorization, createStripeTestAuthorization, issueStripeCard, refundStripeTransaction, retrieveStripeAuthorization, retrieveStripeTransaction } from "@/lib/providers/stripe";
+import { clearLithicAuthorization, createLithicTestAuthorization, issueLithicCard, returnLithicTransaction } from "@/lib/providers/lithic";
 import { createIncreaseFundingTransfer, retrieveIncreaseObject, simulateIncreaseTransfer } from "@/lib/providers/increase";
 import { providerMode } from "@/lib/providers/config";
 import { simulatedId, simulatedProviderEvent } from "@/lib/providers/simulator";
@@ -116,21 +115,11 @@ export async function issueCardAction(_previous, formData) {
     const slug = String(formData.get("cardholder"));
     const cardholder = getDemoUser(slug);
     if (!cardholder || cardholder.portal !== "customer") throw new Error("Choose a customer cardholder.");
-    if (formData.get("termsAccepted") !== "yes") {
-      throw new Error("Confirm that the cardholder accepted the Authorized User Terms.");
-    }
-    const requestHeaders = await headers();
-    const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim();
-    const issued = await issueStripeCard({
-      ...cardholder,
-      acceptedTermsAt: Math.floor(Date.now() / 1000),
-      acceptedTermsIp: forwardedFor || requestHeaders.get("x-real-ip") || "127.0.0.1",
-      acceptedTermsUserAgent: requestHeaders.get("user-agent") || "Corgi sandbox demo",
-    });
+    const issued = await issueLithicCard(cardholder);
     const rows = await insertRows("cards", [{
       business_account_id: DEMO_IDS.account,
       cardholder_actor_id: cardholder.actorId,
-      provider_code: issued.source === "SANDBOX" ? "stripe" : "simulator",
+      provider_code: issued.source === "SANDBOX" ? "lithic" : "simulator",
       provider_card_id: issued.cardId,
       last4: issued.last4,
     }]);
@@ -140,7 +129,7 @@ export async function issueCardAction(_previous, formData) {
       idempotency_key: `card-issued:${issued.cardId}`,
       event_type: "ACTIVATED",
       occurred_at: new Date().toISOString(),
-      details: { cardholder_id: issued.cardholderId, provider_status: "active", source: issued.source },
+      details: { account_token: issued.accountToken, provider_status: "OPEN", source: issued.source },
     }]);
     revalidatePath("/app/cards");
     revalidatePath("/core-loop");
@@ -329,7 +318,7 @@ export async function runReconciliationAction(_previous, formData) {
     const text = await file.text();
     const rows = parseReconciliationCsv(text);
     await callRpc("run_scheme_reconciliation", {
-      p_provider_code: String(formData.get("provider") || "stripe"),
+      p_provider_code: String(formData.get("provider") || "lithic"),
       p_settlement_date: String(formData.get("settlementDate")),
       p_file_reference: file.name,
       p_file_hash: createHash("sha256").update(text).digest("hex"),
@@ -574,125 +563,111 @@ export async function runDemoAction(_previous, formData) {
 }
 
 export async function providerSummary() {
-  return ["persona", "plaid", "stripe", "increase"].map((name) => ({
+  return ["persona", "plaid", "lithic", "increase"].map((name) => ({
     name,
     mode: providerMode(name),
   }));
 }
 
-function requireStripeSandbox() {
-  if (providerMode("stripe") !== "sandbox") {
-    throw new Error("Set STRIPE_MODE=sandbox. Simulator activity does not complete the core loop.");
+function requireLithicSandbox() {
+  if (providerMode("lithic") !== "sandbox") {
+    throw new Error("Set LITHIC_MODE=sandbox. Simulator activity does not complete the core loop.");
   }
 }
 
 export async function coreAuthorizeCardAction() {
   try {
     const ops = await requireOps();
-    requireStripeSandbox();
-    const cards = await selectRows("cards", `business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.stripe&order=created_at.desc&limit=1`);
-    if (!cards[0]) throw new Error("Issue a Stripe sandbox card first.");
-    const authorization = await createStripeTestAuthorization(cards[0].provider_card_id, 5000);
-    const authorizationEvent = authorization.approved === false ? "DECLINED" : "AUTHORIZED";
+    requireLithicSandbox();
+    const cards = await selectRows("cards", `business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.lithic&order=created_at.desc&limit=1`);
+    if (!cards[0]) throw new Error("Issue a Lithic sandbox card first.");
+    const authorization = await createLithicTestAuthorization(cards[0].provider_card_id, 5000);
+    const authorizationEvent = authorization.approved ? "AUTHORIZED" : "DECLINED";
     await callRpc("record_authorization_event", {
-      p_provider_code: "stripe",
+      p_provider_code: "lithic",
       p_provider_authorization_id: authorization.id,
       p_card_id: cards[0].id,
       p_event_type: authorizationEvent,
       p_authorized_total_cents: authorization.approved === false ? null : 5000,
-      p_occurred_at: new Date((authorization.created || Date.now() / 1000) * 1000).toISOString(),
-      p_idempotency_key: `stripe:authorization:${authorization.id}:${authorizationEvent}:5000`,
-      p_merchant_name: authorization.merchant_data?.name || "Corgi Fuel Stop",
-      p_merchant_category_code: authorization.merchant_data?.category_code || "5542",
+      p_occurred_at: authorization.created || new Date().toISOString(),
+      p_idempotency_key: `lithic:authorization:${authorization.eventId}:${authorizationEvent}`,
+      p_merchant_name: authorization.merchantName,
+      p_merchant_category_code: authorization.merchantCategoryCode,
       p_details: { source: "SANDBOX", triggered_by: "core-loop", actor_id: ops.actorId },
     });
     revalidatePath("/core-loop");
     if (authorizationEvent === "DECLINED") {
-      throw new Error("Stripe declined the $50.00 test authorization. Add USD test funds to the Stripe Issuing balance, then try again.");
+      throw new Error(`Lithic declined the $50.00 test authorization (${authorization.result || "unknown result"}). Check the sandbox account and card limits.`);
     }
-    return { message: "Stripe authorized $50.00 and Corgi placed the hold." };
+    return { message: "Lithic authorized $50.00 and Corgi placed the hold." };
   } catch (error) { return resultError(error); }
 }
 
 export async function coreSettleCardAction() {
   try {
     const ops = await requireOps();
-    requireStripeSandbox();
+    requireLithicSandbox();
     const activeHolds = await selectRows("active_card_holds", `business_account_id=eq.${DEMO_IDS.account}&order=last_recorded_at.desc`);
-    if (!activeHolds.length) throw new Error("Create an approved Stripe authorization with an active hold first.");
+    if (!activeHolds.length) throw new Error("Create an approved Lithic authorization with an active hold first.");
     const activeAuthorizationIds = activeHolds.map((hold) => hold.authorization_id).join(",");
-    const auths = await selectRows("card_authorizations", `id=in.(${activeAuthorizationIds})&provider_code=eq.stripe&order=first_seen_at.desc&limit=1`);
-    if (!auths[0]) throw new Error("No active hold belongs to a Stripe authorization.");
-    const captured = await captureStripeAuthorization(auths[0].provider_authorization_id, 7340);
-    const transactionId = captured.transactions?.at(-1);
-    if (!transactionId) throw new Error("Stripe accepted capture but did not return its transaction yet. Reload after the webhook arrives.");
-    const transaction = await retrieveStripeTransaction(typeof transactionId === "string" ? transactionId : transactionId.id);
-    const authDate = new Date(auths[0].first_seen_at);
-    authDate.setUTCDate(authDate.getUTCDate() + 2);
+    const auths = await selectRows("card_authorizations", `id=in.(${activeAuthorizationIds})&provider_code=eq.lithic&order=first_seen_at.desc&limit=1`);
+    if (!auths[0]) throw new Error("No active hold belongs to a Lithic authorization.");
+    const clearing = await clearLithicAuthorization(auths[0].provider_authorization_id, 7340);
     await callRpc("record_card_settlement", {
-      p_provider_code: "stripe",
-      p_provider_settlement_id: transaction.id,
+      p_provider_code: "lithic",
+      p_provider_settlement_id: clearing.id,
       p_card_id: auths[0].card_id,
       p_external_authorization_id: auths[0].provider_authorization_id,
       p_amount_cents: 7340,
-      p_value_date: authDate.toISOString().slice(0, 10),
-      p_occurred_at: new Date((transaction.created || Date.now() / 1000) * 1000).toISOString(),
+      p_value_date: clearing.created.slice(0, 10),
+      p_occurred_at: clearing.created || new Date().toISOString(),
       p_explicit_force_post: false,
       p_is_final_capture: true,
-      p_idempotency_key: `stripe:transaction:${transaction.id}`,
+      p_idempotency_key: `lithic:clearing:${clearing.id}`,
       p_actor_id: ops.actorId,
     });
     revalidatePath("/core-loop");
-    return { message: "Stripe settled $73.40; Corgi released the $50 hold and booked the two-day-later value date." };
+    return { message: "Lithic cleared $73.40; Corgi released the $50 hold and booked the provider value date." };
   } catch (error) { return resultError(error); }
 }
 
 export async function coreReverseSettlementAction() {
   try {
     const ops = await requireOps();
-    requireStripeSandbox();
-    const settlements = await selectRows("card_settlements", "provider_code=eq.stripe&order=recorded_at.desc&limit=1");
-    if (!settlements[0]) throw new Error("Settle the Stripe authorization first.");
-    await refundStripeTransaction(settlements[0].provider_settlement_id, settlements[0].amount_cents);
-    const authorization = await retrieveStripeAuthorization(settlements[0].external_authorization_id);
-    const ids = authorization?.transactions || [];
-    let refund = null;
-    for (const item of [...ids].reverse()) {
-      const transaction = await retrieveStripeTransaction(typeof item === "string" ? item : item.id);
-      if (transaction.type === "refund") { refund = transaction; break; }
-    }
-    if (!refund) {
-      revalidatePath("/core-loop");
-      return { message: "Stripe accepted the refund. Waiting for its signed transaction webhook before Corgi marks the reversal complete." };
-    }
+    requireLithicSandbox();
+    const settlements = await selectRows("card_settlements", "provider_code=eq.lithic&order=recorded_at.desc&limit=1");
+    if (!settlements[0]) throw new Error("Settle the Lithic authorization first.");
+    const cards = await selectRows("cards", `id=eq.${settlements[0].card_id}&provider_code=eq.lithic&limit=1`);
+    if (!cards[0]) throw new Error("The settlement's Lithic card is missing.");
+    const returned = await returnLithicTransaction(cards[0].provider_card_id, settlements[0].amount_cents);
     await callRpc("reverse_card_settlement", {
       p_settlement_id: settlements[0].id,
-      p_idempotency_key: `stripe:refund:${refund.id}`,
+      p_idempotency_key: `lithic:return:${returned.id}`,
       p_value_date: settlements[0].value_date,
-      p_reason: "Stripe Issuing sandbox refund",
+      p_reason: "Lithic sandbox return",
       p_actor_id: ops.actorId,
     });
     revalidatePath("/core-loop");
-    return { message: "Stripe emitted a refund and Corgi appended the settlement reversal." };
+    return { message: "Lithic emitted a return and Corgi appended the settlement reversal." };
   } catch (error) { return resultError(error); }
 }
 
 export async function coreReconcileAction() {
   try {
     await requireOps();
-    const settlements = await selectRows("card_settlements", "provider_code=eq.stripe&order=recorded_at.desc&limit=1");
-    if (!settlements[0]) throw new Error("Settle a Stripe transaction first.");
+    const settlements = await selectRows("card_settlements", "provider_code=eq.lithic&order=recorded_at.desc&limit=1");
+    if (!settlements[0]) throw new Error("Settle a Lithic transaction first.");
     const row = { processor_reference: settlements[0].provider_settlement_id, amount_cents: settlements[0].amount_cents, value_date: settlements[0].value_date };
     const body = JSON.stringify(row);
     await callRpc("run_scheme_reconciliation", {
-      p_provider_code: "stripe",
+      p_provider_code: "lithic",
       p_settlement_date: settlements[0].value_date,
-      p_file_reference: `stripe-core-loop-${settlements[0].value_date}.csv`,
+      p_file_reference: `lithic-core-loop-${settlements[0].value_date}.csv`,
       p_file_hash: createHash("sha256").update(body).digest("hex"),
       p_rows: [row],
     });
     revalidatePath("/core-loop");
     revalidatePath("/ops/reconciliation");
-    return { message: "The generated Stripe scheme row reconciled against the immutable settlement." };
+    return { message: "The generated Lithic processor row reconciled against the immutable settlement." };
   } catch (error) { return resultError(error); }
 }

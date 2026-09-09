@@ -3,7 +3,7 @@
 | ------------------------------- | ------------------------------------- |
 | **Frontend + API Routes**       | Next.js                               |
 | **Database (Ledger)**           | Supabase (Postgres)                   |
-| **Card Issuing**                | Stripe Issuing (Test Mode)            |
+| **Card Issuing**                | Lithic (Sandbox)                      |
 | **KYB / Business Verification** | Persona (Sandbox)                     |
 | **Bank Linking**                | Plaid (Sandbox)                       |
 | **ACH Transfers**               | Increase (Sandbox)                    |
@@ -29,11 +29,11 @@
     3. Mark the settlement as matched.
 
 ## [T+4h] Idempotency part 
-- Stripe will replay webhooks. If a settlement webhook arrives twice, you must not post two ledger entries. Check if you've already processed this `event_id` before doing anything:
+- Providers replay webhooks. If a settlement webhook arrives twice, you must not post two ledger entries. Check if you've already processed this `event_id` before doing anything:
 
 Table:
 `processed_webhook_events`:
-  `stripe_event_id`  -- primary key
+  `provider_event_id`  -- primary key
   `processed_at`
 
 - On every webhook: check this table first. If the event_id exists, return 200 and do nothing.
@@ -93,7 +93,7 @@ Table:
 - Breaks screen with aging
 
 ## [T+20h] SANDBOX-FIRST CORE LOOP
-- Persona, Plaid, Stripe Issuing, and Increase default to sandbox mode.
+- Persona, Plaid, Lithic, and Increase default to sandbox mode.
 - A provider may be changed independently to `simulated`; sandbox errors are returned and never trigger simulated success.
 - Standing orders remain in the core loop with one deterministic occurrence per date and exactly one NSF retry after 24 hours.
 - The three dropdown identities are demo authentication; signed cookies and server-side role checks enforce portal isolation.
@@ -109,11 +109,11 @@ Table:
 
 ## [T+30h] 18-HOUR FREEZE PLAN
 - The core loop is the end-to-end demo script, not a customer or operations navigation item. Keep any executable runbook off the primary sidebar.
-- Freeze the submission around the immutable ledger, holds, Stripe-style card lifecycle, maker-checker ACH, bitemporal statements, and reconciliation.
+- Freeze the submission around the immutable ledger, holds, card authorization/clearing lifecycle, maker-checker ACH, bitemporal statements, and reconciliation.
 - Cut USDC, wires, native mobile, the general public API, full statement artifacts, and all stretch-ladder features. The detailed rationale and week-two plan live in `CUTLIST.md`.
 - Remove USDC/internal-transfer specialization from the fresh-install schema. A future rail should arrive through the generic payment/provider-event boundary rather than as speculative v0 tables.
 - Persona remains simulated because sandbox access is sales-gated. Never present it as live.
-- Customer-facing balances come only from Supabase ledger projections. Plaid, Increase, and Stripe contribute verified external events; their balances are not Corgi's customer balance.
+- Customer-facing balances come only from Supabase ledger projections. Plaid, Increase, and the card processor contribute verified external events; provider balances are not Corgi's customer balance.
 
 ## [T+31h] STRIPE ISSUING-ONLY
 - The earlier Stripe blocker was the Treasury/Financial Account provisioning path, not the Issuing card lifecycle required by the track.
@@ -148,3 +148,7 @@ Table:
 - Support both Stripe funding models instead of asserting standalone-only: prefer the standalone Issuing balance when present, otherwise use the configured or first open v2 Financial Account.
 - This does not make Stripe the customer ledger. Its balance only funds Stripe's test card; customer ledger and available balance remain Corgi projections.
 - Card lifecycle code is ready, but sandbox activation and test funding are external prerequisites and must be completed in Stripe before presenting Issuing as live.
+
+## [T+34h] REPLACE STRIPE ISSUING WITH LITHIC
+- Issue with Stripe sandbox card issuing, replaced with lithic
+

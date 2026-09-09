@@ -3,6 +3,11 @@
 
 begin;
 
+-- Existing projects need the new card processor before Lithic-backed rows can be inserted.
+insert into public.providers (code, display_name)
+values ('lithic', 'Lithic')
+on conflict (code) do update set display_name = excluded.display_name;
+
 create table if not exists private.provider_connection_secrets (
   provider_code text not null references public.providers(code) on delete restrict,
   organization_id uuid not null references public.organizations(id) on delete restrict,

@@ -4,7 +4,7 @@ import { appUrl, providerMode, requiredEnv } from "./config";
 import { simulatedId } from "./simulator";
 
 function plaidBaseUrl() {
-  const environment = process.env.PLAID_ENV || "sandbox";
+  const environment = process.env.PLAID_MODE || "sandbox";
   return `https://${environment}.plaid.com`;
 }
 

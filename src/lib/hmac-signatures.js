@@ -5,16 +5,6 @@ function sameText(left, right) {
   return timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-export function verifyStripeSignature(rawBody, header, secret) {
-  const parts = (header || "").split(",").map((part) => part.split("="));
-  const timestamp = parts.find(([name]) => name === "t")?.[1];
-  const signatures = parts.filter(([name]) => name === "v1").map(([, value]) => value);
-  const timestampNumber = Number(timestamp);
-  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() / 1000 - timestampNumber) > 300) return false;
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest("hex");
-  return signatures.some((signature) => sameText(expected, signature));
-}
-
 export function verifyPersonaSignature(rawBody, header, secret) {
   return (header || "").split(" ").some((pair) => {
     const values = Object.fromEntries(pair.split(",").map((part) => part.split("=")));

@@ -6,7 +6,6 @@ import { getPlaidVerificationKey } from "./providers/plaid";
 export {
   verifyIncreaseSignature,
   verifyPersonaSignature,
-  verifyStripeSignature,
 } from "./hmac-signatures";
 
 function sameText(left, right) {

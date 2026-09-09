@@ -1,6 +1,3 @@
-[mcp_servers.stripe]
-url = "https://mcp.stripe.com"
-
 [mcp_servers.corgi]
 command = "node"
 args = ["--env-file=.env", "mcp/server.mjs"]
