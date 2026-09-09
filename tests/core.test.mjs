@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import Lithic from "lithic";
 import { increasePaymentEventKey, increasePaymentEventType, increasePaymentValueDate } from "../src/lib/increase-transfer-state.js";
+import { lithicTransactionCommands } from "../src/lib/lithic-events.js";
 import { dollarsToCents, formatUsd } from "../src/lib/money.js";
 import { verifyIncreaseSignature, verifyPersonaSignature } from "../src/lib/hmac-signatures.js";
 import { createSignedSessionValue, readSignedSessionSlug } from "../src/lib/session-signature.js";
@@ -94,4 +95,91 @@ test("Increase returns take precedence over settlement", () => {
     return: { reason: "insufficient_fund" },
   };
   assert.equal(increasePaymentEventType(transfer), "RETURNED");
+});
+
+test("Lithic authorization advice becomes an incremental total", () => {
+  const commands = lithicTransactionCommands({
+    token: "transaction_incremental",
+    result: "APPROVED",
+    authorization_amount: 7500,
+    pending_amount: 7500,
+    events: [
+      { token: "event_auth", type: "AUTHORIZATION", result: "APPROVED", amount: 5000, created: "2026-09-08T10:00:00Z" },
+      { token: "event_advice", type: "AUTHORIZATION_ADVICE", result: "APPROVED", amount: 7500, created: "2026-09-08T11:00:00Z" },
+    ],
+  });
+
+  assert.deepEqual(
+    commands.map(({ eventType, authorizedTotalCents }) => ({ eventType, authorizedTotalCents })),
+    [
+      { eventType: "AUTHORIZED", authorizedTotalCents: 5000 },
+      { eventType: "INCREMENTED", authorizedTotalCents: 7500 },
+    ],
+  );
+});
+
+test("Lithic multiple completion only marks the clearing that exhausts the hold as final", () => {
+  const commands = lithicTransactionCommands({
+    token: "transaction_multiple_capture",
+    result: "APPROVED",
+    pending_amount: 0,
+    events: [
+      { token: "event_auth", type: "AUTHORIZATION", result: "APPROVED", amount: 5000, created: "2026-09-08T10:00:00Z" },
+      { token: "event_capture_1", type: "CLEARING", result: "APPROVED", amount: 3000, created: "2026-09-09T10:00:00Z" },
+      { token: "event_capture_2", type: "CLEARING", result: "APPROVED", amount: 2000, created: "2026-09-10T10:00:00Z" },
+    ],
+  });
+  const settlements = commands.filter((command) => command.kind === "settlement");
+
+  assert.deepEqual(
+    settlements.map(({ eventToken, amountCents, finalCapture }) => ({ eventToken, amountCents, finalCapture })),
+    [
+      { eventToken: "event_capture_1", amountCents: 3000, finalCapture: false },
+      { eventToken: "event_capture_2", amountCents: 2000, finalCapture: true },
+    ],
+  );
+});
+
+test("Lithic partial capture preserves the remaining hold", () => {
+  const commands = lithicTransactionCommands({
+    token: "transaction_partial_capture",
+    result: "APPROVED",
+    amounts: { hold: { amount: 2000 } },
+    events: [
+      { token: "event_auth", type: "AUTHORIZATION", result: "APPROVED", amount: 5000, created: "2026-09-08T10:00:00Z" },
+      { token: "event_capture", type: "CLEARING", result: "APPROVED", amount: 3000, created: "2026-09-09T10:00:00Z" },
+    ],
+  });
+
+  assert.equal(commands.find((command) => command.kind === "settlement").finalCapture, false);
+});
+
+test("Lithic force post has no invented authorization link", () => {
+  const commands = lithicTransactionCommands({
+    token: "transaction_force_post",
+    result: "APPROVED",
+    events: [
+      { token: "event_financial_auth", type: "FINANCIAL_AUTHORIZATION", result: "APPROVED", amount: 1899, created: "2026-09-09T10:00:00Z" },
+    ],
+  });
+  const settlement = commands[0];
+
+  assert.equal(settlement.forcePost, true);
+  assert.equal(settlement.finalCapture, true);
+  assert.equal(settlement.externalAuthorizationId, null);
+});
+
+test("Lithic return exposes only exact provider correlation references", () => {
+  const commands = lithicTransactionCommands({
+    token: "transaction_return",
+    transaction_series: {
+      related_transaction_token: "transaction_original",
+      related_transaction_event_token: "clearing_original",
+    },
+    events: [
+      { token: "event_return", type: "RETURN", result: "APPROVED", amount: 5000, created: "2026-09-10T10:00:00Z" },
+    ],
+  });
+
+  assert.deepEqual(commands[0].relatedReferences, ["clearing_original", "transaction_original"]);
 });

@@ -114,10 +114,15 @@ where la.business_account_id is not null
 create or replace view public.latest_reconciliation_breaks
 with (security_invoker = true)
 as
-with latest_result as (
-  select distinct on (break_fingerprint) *
-  from public.reconciliation_results
-  order by break_fingerprint, detected_at desc, id desc
+with latest_run as (
+  select distinct on (provider_code, settlement_date)
+    id, provider_code, settlement_date
+  from public.reconciliation_runs
+  order by provider_code, settlement_date, started_at desc, id desc
+), latest_results as (
+  select rr.*
+  from public.reconciliation_results rr
+  join latest_run lr on lr.id = rr.reconciliation_run_id
 ), first_seen as (
   select break_fingerprint, min(detected_at) as first_detected_at
   from public.reconciliation_results
@@ -133,7 +138,7 @@ select
   current_date - fs.first_detected_at::date as age_days,
   coalesce(le.event_type, 'OPENED') as status,
   le.note
-from latest_result lr
+from latest_results lr
 join first_seen fs using (break_fingerprint)
 left join latest_event le on le.reconciliation_result_id = lr.id;
 
@@ -152,6 +157,10 @@ as $$
 declare
   v_run_id uuid;
 begin
+  if jsonb_typeof(p_rows) <> 'array' then
+    raise exception 'reconciliation rows must be a JSON array' using errcode = '22023';
+  end if;
+
   select id into v_run_id
   from public.reconciliation_runs
   where provider_code = p_provider_code and file_hash = p_file_hash;
@@ -176,6 +185,16 @@ begin
     row
   from jsonb_array_elements(p_rows) with ordinality as input(row, ordinality);
 
+  if exists (
+    select 1
+    from public.reconciliation_file_rows rfr
+    where rfr.reconciliation_run_id = v_run_id
+      and rfr.value_date <> p_settlement_date
+  ) then
+    raise exception 'every file row value_date must match the reconciliation settlement date'
+      using errcode = '23514';
+  end if;
+
   insert into public.reconciliation_results (
     reconciliation_run_id, break_fingerprint, break_type, file_row_id,
     settlement_id, journal_entry_id, processor_reference,
@@ -183,8 +202,8 @@ begin
   )
   select
     v_run_id,
-    md5('FILE|' || rfr.processor_reference),
-    case when cs.id is null then 'IN_FILE_NOT_LEDGER'::public.reconciliation_break_type
+    md5(p_provider_code || '|' || p_settlement_date::text || '|FILE|' || rfr.processor_reference),
+    case when csjl.journal_entry_id is null then 'IN_FILE_NOT_LEDGER'::public.reconciliation_break_type
          else 'AMOUNT_MISMATCH'::public.reconciliation_break_type end,
     rfr.id,
     cs.id,
@@ -196,10 +215,11 @@ begin
   left join public.card_settlements cs
     on cs.provider_code = p_provider_code
    and cs.provider_settlement_id = rfr.processor_reference
+   and cs.value_date = p_settlement_date
   left join public.card_settlement_journal_links csjl
     on csjl.settlement_id = cs.id and csjl.link_type = 'POSTING'
   where rfr.reconciliation_run_id = v_run_id
-    and (cs.id is null or cs.amount_cents <> rfr.amount_cents);
+    and (csjl.journal_entry_id is null or cs.amount_cents <> rfr.amount_cents);
 
   insert into public.reconciliation_results (
     reconciliation_run_id, break_fingerprint, break_type, settlement_id,
@@ -207,7 +227,7 @@ begin
   )
   select
     v_run_id,
-    md5('LEDGER|' || cs.provider_settlement_id),
+    md5(p_provider_code || '|' || p_settlement_date::text || '|LEDGER|' || cs.provider_settlement_id),
     'IN_LEDGER_NOT_FILE',
     cs.id,
     csjl.journal_entry_id,

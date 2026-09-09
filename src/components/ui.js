@@ -28,6 +28,16 @@ export function BalanceCard({ label, cents, note, accent = false }) {
   );
 }
 
+export function MetricCard({ label, value, note }) {
+  return (
+    <section className="balance-card">
+      <p>{label}</p>
+      <strong>{Number(value || 0).toLocaleString("en-US")}</strong>
+      {note ? <small>{note}</small> : null}
+    </section>
+  );
+}
+
 export function EmptyState({ title, children }) {
   return (
     <div className="empty-state">

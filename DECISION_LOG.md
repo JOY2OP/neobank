@@ -104,7 +104,7 @@ Table:
 
 ## [T+24h] Persona KYB is sales gated, going with simulated env
 
-## [T+25h] Stripe `treasury card` feature shows "We're setting up your account. We'll email you when it's ready" error. 
+## [T+25h] Stripe `treasury` feature shows "We're setting up your account. We'll email you when it's ready" error. 
 - Going with simulated with this one too.
 
 ## [T+30h] 18-HOUR FREEZE PLAN
@@ -134,7 +134,8 @@ Table:
 - Before creating a test authorization, verify the standalone USD Issuing balance can cover the requested amount. Acme's customer balance remains the independent Supabase ledger.
 
 
-## [T+33h] Unable to setup STANDALONE ISSUING
+## [T+33h] Unable to setup STANDALONE ISSUING 😭
+
 
 ## [T+33h] MCP AND PROVIDER DEGRADATION
 - Add a stdio MCP surface with five read tools and one payment-request write tool.
@@ -152,3 +153,9 @@ Table:
 ## [T+34h] REPLACE STRIPE ISSUING WITH LITHIC
 - Issue with Stripe sandbox card issuing, replaced with lithic
 
+## [T+35h] HARDEN THE LIVE-FIRE DOMAIN BOUNDARY
+- Replay every Lithic transaction snapshot into deterministic event-level commands so a missed webhook is recovered and older events remain idempotent.
+- Treat authorization advice as an incremental total and use Lithic's remaining hold to distinguish partial from final clearing across multiple completion.
+- Never guess which purchase a return corrects. Require an exact related transaction/clearing reference and leave ambiguous deliveries retryable for operations.
+- Reconciliation compares scheme rows with posted journal links, not merely settlement records. A clean rerun for the same provider and settlement date replaces stale break projections.
+- Enforce the merchant-correction value date inside Postgres and run the hostile accounting suite in a disposable PostgreSQL container with every test mutation rolled back.

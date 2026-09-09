@@ -1797,6 +1797,11 @@ begin
     raise exception 'card settlement not found' using errcode = 'P0002';
   end if;
 
+  if p_value_date is distinct from v_settlement.value_date then
+    raise exception 'card settlement reversals must use the original settlement value date'
+      using errcode = '23514';
+  end if;
+
   select journal_entry_id into v_reversal_journal_id
   from public.card_settlement_journal_links
   where settlement_id = p_settlement_id and link_type = 'REVERSAL';

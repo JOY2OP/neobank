@@ -1,4 +1,5 @@
 import { recordProcessingAttempt, shouldProcessProviderEvent, storeProviderEvent } from "@/lib/provider-events";
+import { lithicTransactionCommands } from "@/lib/lithic-events";
 import { lithicClient } from "@/lib/providers/lithic";
 import { requiredEnv } from "@/lib/providers/config";
 import { callRpc, selectRows } from "@/lib/supabase";
@@ -9,72 +10,91 @@ async function findCard(providerCardId) {
   return cards[0];
 }
 
-function latestEvent(transaction, types) {
-  return [...(transaction.events || [])].reverse().find((event) => types.includes(event.type));
-}
+async function settlementForReturn(cardId, returnEventToken, references) {
+  // The core-loop return action records this exact provider event token on the
+  // chosen settlement. It is a durable correlation if the provider's return
+  // snapshot does not include transaction_series references.
+  const priorEvents = await selectRows(
+    "card_settlement_events",
+    `idempotency_key=eq.${encodeURIComponent(`lithic:return:${returnEventToken}`)}&select=settlement_id&limit=1`,
+  );
+  if (priorEvents[0]) {
+    const correlated = await selectRows(
+      "card_settlements",
+      `id=eq.${priorEvents[0].settlement_id}&provider_code=eq.lithic&card_id=eq.${cardId}&limit=1`,
+    );
+    if (correlated[0]) return correlated[0];
+  }
 
-function eventAmount(event, fallback) {
-  return Math.abs(Number(event?.amounts?.cardholder?.amount ?? event?.amount ?? fallback ?? 0));
+  for (const reference of references) {
+    const encoded = encodeURIComponent(reference);
+    const byClearing = await selectRows(
+      "card_settlements",
+      `provider_code=eq.lithic&card_id=eq.${cardId}&provider_settlement_id=eq.${encoded}&limit=2`,
+    );
+    if (byClearing.length === 1) return byClearing[0];
+
+    const byAuthorization = await selectRows(
+      "card_settlements",
+      `provider_code=eq.lithic&card_id=eq.${cardId}&external_authorization_id=eq.${encoded}&limit=2`,
+    );
+    if (byAuthorization.length === 1) return byAuthorization[0];
+    if (byAuthorization.length > 1) {
+      throw new Error("Lithic return matches multiple captures; an event-level clearing reference is required.");
+    }
+  }
+  throw new Error("Lithic return has no exact original transaction reference; refusing to reverse the latest card settlement.");
 }
 
 async function processLithicTransaction(transaction, providerEventId) {
   const card = await findCard(transaction.card_token);
-  const returnEvent = latestEvent(transaction, ["RETURN"]);
-  if (returnEvent) {
-    const settlements = await selectRows(
-      "card_settlements",
-      `provider_code=eq.lithic&card_id=eq.${card.id}&order=recorded_at.desc&limit=1`,
-    );
-    if (!settlements[0]) throw new Error("Lithic return arrived before its original settlement.");
+  for (const command of lithicTransactionCommands(transaction)) {
+    if (command.kind === "authorization") {
+      await callRpc("record_authorization_event", {
+        p_provider_code: "lithic",
+        p_provider_authorization_id: transaction.token,
+        p_card_id: card.id,
+        p_event_type: command.eventType,
+        p_authorized_total_cents: command.authorizedTotalCents,
+        p_occurred_at: command.occurredAt,
+        p_idempotency_key: `lithic:authorization:${command.eventToken}:${command.eventType}`,
+        p_provider_event_id: providerEventId,
+        p_merchant_name: transaction.merchant?.descriptor || null,
+        p_merchant_category_code: transaction.merchant?.mcc || null,
+        p_details: { lithic_status: transaction.status, lithic_result: transaction.result },
+      });
+      continue;
+    }
+
+    if (command.kind === "settlement") {
+      if (!Number.isSafeInteger(command.amountCents) || command.amountCents <= 0) {
+        throw new Error(`Lithic clearing ${command.eventToken} has an invalid cardholder amount.`);
+      }
+      await callRpc("record_card_settlement", {
+        p_provider_code: "lithic",
+        p_provider_settlement_id: command.eventToken,
+        p_card_id: card.id,
+        p_external_authorization_id: command.externalAuthorizationId,
+        p_amount_cents: command.amountCents,
+        p_value_date: command.valueDate,
+        p_occurred_at: command.occurredAt,
+        p_explicit_force_post: command.forcePost,
+        p_is_final_capture: command.finalCapture,
+        p_idempotency_key: `lithic:clearing:${command.eventToken}`,
+        p_provider_event_id: providerEventId,
+      });
+      continue;
+    }
+
+    const settlement = await settlementForReturn(card.id, command.eventToken, command.relatedReferences);
     await callRpc("reverse_card_settlement", {
-      p_settlement_id: settlements[0].id,
-      p_idempotency_key: `lithic:return:${returnEvent.token}`,
-      p_value_date: settlements[0].value_date,
+      p_settlement_id: settlement.id,
+      p_idempotency_key: `lithic:return:${command.eventToken}`,
+      p_value_date: settlement.value_date,
       p_reason: "Lithic sandbox return",
       p_provider_event_id: providerEventId,
     });
-    return;
   }
-
-  if (transaction.status === "SETTLED") {
-    const clearing = latestEvent(transaction, ["CLEARING", "FINANCIAL_AUTHORIZATION"]);
-    if (!clearing) return;
-    await callRpc("record_card_settlement", {
-      p_provider_code: "lithic",
-      p_provider_settlement_id: clearing.token,
-      p_card_id: card.id,
-      p_external_authorization_id: transaction.token,
-      p_amount_cents: eventAmount(clearing, transaction.settled_amount),
-      p_value_date: clearing.created.slice(0, 10),
-      p_occurred_at: clearing.created,
-      p_explicit_force_post: clearing.type === "FINANCIAL_AUTHORIZATION",
-      p_is_final_capture: true,
-      p_idempotency_key: `lithic:clearing:${clearing.token}`,
-      p_provider_event_id: providerEventId,
-    });
-    return;
-  }
-
-  const authorization = latestEvent(transaction, ["AUTHORIZATION", "AUTHORIZATION_ADVICE"]);
-  const terminal = latestEvent(transaction, ["AUTHORIZATION_REVERSAL", "AUTHORIZATION_EXPIRY"]);
-  let eventType = transaction.result === "APPROVED" ? "AUTHORIZED" : "DECLINED";
-  if (transaction.status === "VOIDED" || terminal?.type === "AUTHORIZATION_REVERSAL") eventType = "REVERSED";
-  if (transaction.status === "EXPIRED" || terminal?.type === "AUTHORIZATION_EXPIRY") eventType = "EXPIRED";
-  const lifecycleEvent = terminal || authorization;
-  if (!lifecycleEvent) return;
-  await callRpc("record_authorization_event", {
-    p_provider_code: "lithic",
-    p_provider_authorization_id: transaction.token,
-    p_card_id: card.id,
-    p_event_type: eventType,
-    p_authorized_total_cents: eventType === "AUTHORIZED" ? eventAmount(authorization, transaction.authorization_amount) : null,
-    p_occurred_at: lifecycleEvent.created,
-    p_idempotency_key: `lithic:authorization:${lifecycleEvent.token}:${eventType}`,
-    p_provider_event_id: providerEventId,
-    p_merchant_name: transaction.merchant?.descriptor || null,
-    p_merchant_category_code: transaction.merchant?.mcc || null,
-    p_details: { lithic_status: transaction.status, lithic_result: transaction.result },
-  });
 }
 
 export async function POST(request) {

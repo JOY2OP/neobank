@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test --experimental-test-isolation=none --experimental-default-type=module tests/*.test.mjs",
+    "test:domain": "node scripts/domain-gauntlet.mjs",
     "seed": "node --env-file=.env scripts/seed.mjs",
     "smoke": "node --env-file=.env --experimental-default-type=module scripts/smoke.mjs",
     "mcp": "node --env-file=.env mcp/server.mjs",

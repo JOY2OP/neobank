@@ -91,8 +91,10 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 2. The route verifies the signature against the untouched request body.
 3. `src/lib/provider-events.js` persists the verified delivery before processing, so failures remain visible and the external event ID deduplicates replays.
 4. A retryable failure returns an error to the provider. Re-delivery processes the stored payload again and appends another attempt; successful events become no-op replays.
-5. An authorization calls `record_authorization_event`, creating a computed hold. A clearing calls `record_card_settlement`, which posts the journal and releases the hold once.
-6. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
+5. Every transaction snapshot is replayed as deterministic event commands. Authorization advice becomes an incremental total; each clearing is its own capture; only the clearing that exhausts Lithic's remaining hold is final.
+6. An authorization calls `record_authorization_event`, creating a computed hold. A clearing calls `record_card_settlement`, which posts the journal and releases only the captured amount until final capture.
+7. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
+8. Returns must carry an exact original transaction or clearing reference. An ambiguous return is retained as retryable instead of reversing the latest settlement on a card.
 
 ### Outbound ACH and maker-checker
 
@@ -120,18 +122,21 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 
 ## Reconciliation and bitemporal statements
 
-Ops can upload the sample at `public/sample-scheme-file.csv`. The additive migration processes a file atomically and projects `IN_FILE_NOT_LEDGER`, `IN_LEDGER_NOT_FILE`, and `AMOUNT_MISMATCH` with first-seen aging. Duplicate file hashes return the original run.
+Ops can upload the sample at `public/sample-scheme-file.csv`. The additive migration processes a file atomically and projects `IN_FILE_NOT_LEDGER`, `IN_LEDGER_NOT_FILE`, and `AMOUNT_MISMATCH` with first-seen aging. Duplicate file hashes return the original run. A parked settlement is not ledger truth until it has a posting journal link, and a clean rerun for the same provider/date removes the previous break from the current projection.
 
-Statements use `value_date` for the corrected financial day and `booked_at` for the `knowledge_cutoff`. Moving the cutoff backward shows what the system knew before a later reversal arrived.
+Statements use `value_date` for the corrected financial day and `booked_at` for the `knowledge_cutoff`. Moving the cutoff backward shows what the system knew before a later reversal arrived. Card reversals are database-enforced to use the original settlement value date.
 
 ## Verification
 
 ```bash
 npm test
+npm run test:domain
 npm run lint
 npm run build
 ```
 
 With the local server running, `npm run smoke` verifies that all 13 authenticated customer and Ops pages finish rendering seeded data.
 
-Database/provider integration tests require an applied Supabase schema and sandbox credentials. The Ops Demo Lab covers authorization, `$73.40` over-capture, reversal, settlement-before-auth, force post, duplicate webhook, ACH return, provider delay, standing-order execution, and NSF retry.
+`npm run test:domain` starts a disposable local PostgreSQL 15 container, applies the complete schema and migrations, runs the rollback-only SQL gauntlet, and removes the container. It proves derived available balance, `$73.40` over-capture, incremental and multiple partial captures, duplicate delivery, bitemporal reversal, settlement-before-auth, force post, append-only enforcement, and reconciliation of parked settlements.
+
+For an existing hosted database, apply `supabase-domain-hardening-migration.sql` once through the Supabase SQL Editor before running the application changes. The hosted database is not modified by the local gauntlet.
