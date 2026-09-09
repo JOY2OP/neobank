@@ -97,3 +97,7 @@ Table:
 - A provider may be changed independently to `simulated`; sandbox errors are returned and never trigger simulated success.
 - Standing orders remain in the core loop with one deterministic occurrence per date and exactly one NSF retry after 24 hours.
 - The three dropdown identities are demo authentication; signed cookies and server-side role checks enforce portal isolation.
+
+## [T+22h] SETTING UP
+- setting up credentials for the services for both local and prod
+- using ngrok for localhost webhook
