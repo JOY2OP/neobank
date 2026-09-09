@@ -1,0 +1,13 @@
+import { createStandingOrderAction } from "@/app/actions";
+import { ActionForm } from "@/components/action-form";
+import { EmptyState, SectionHeading, SetupNotice, StatusPill } from "@/components/ui";
+import { getCustomerDashboard } from "@/lib/data";
+import { formatDate, formatUsd } from "@/lib/money";
+import { requireCustomer } from "@/lib/session";
+
+export default async function StandingOrdersPage() {
+  const user = await requireCustomer();
+  const data = await getCustomerDashboard(user);
+  const today = new Date().toISOString().slice(0, 10);
+  return <><SectionHeading eyebrow="Scheduled ACH" title="Standing orders" description="Each due date runs once. Insufficient funds trigger one retry after 24 hours, then the order pauses." /><SetupNotice error={data.error} />{!data.error ? <div className="split-grid"><ActionForm action={createStandingOrderAction} submitLabel="Create standing order"><h2>New schedule</h2><label>Beneficiary<select name="beneficiary" required defaultValue=""><option value="" disabled>Choose beneficiary</option>{data.beneficiaries.map((item) => <option value={item.id} key={item.id}>{item.display_name}</option>)}</select></label><label>Amount<input name="amount" inputMode="decimal" placeholder="1250.00" required /></label><label>Cadence<select name="cadence" defaultValue="MONTHLY"><option value="MONTHLY">Monthly</option><option value="WEEKLY">Weekly</option></select></label><label>First execution<input type="date" name="startsOn" min={today} defaultValue={today} required /></label><label>Optional end date<input type="date" name="endsOn" min={today} /></label></ActionForm><section className="panel"><div className="panel-head"><div><span className="eyebrow">Schedules</span><h2>Current orders</h2></div></div>{data.orders.length ? <div className="stack-list">{data.orders.map((order) => { const nsfAttempts = data.attempts.filter((attempt) => attempt.standing_order_id === order.id && attempt.event_type === "INSUFFICIENT_FUNDS"); const retry = data.attempts.find((attempt) => attempt.standing_order_id === order.id && attempt.event_type === "RETRY_SCHEDULED"); return <article className="list-row column" key={order.id}><div><strong>{formatUsd(order.amount_cents)} · {order.schedule_rule}</strong><span>Starts {formatDate(order.starts_on)}</span></div><StatusPill tone={order.status === "PAUSED" ? "danger" : "success"}>{order.status}</StatusPill>{nsfAttempts.length ? <p className="nsf-note">NSF alert: no money moved. {order.status === "PAUSED" ? "The retry also failed, so this order is paused." : `One retry is scheduled for ${formatDate(retry?.retry_at)}.`}</p> : null}</article>;})}</div> : <EmptyState title="No standing orders">Create a weekly or monthly ACH schedule.</EmptyState>}</section></div> : null}</>;
+}

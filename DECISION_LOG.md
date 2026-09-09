@@ -21,7 +21,7 @@
 ## [T+4h] Insufficent balance policy: 
 - Fail the payment, notify the customer, retry in 24h (SHOULD BE VISIBLE TO USERS)
 
-## [T+4h] OUT OF ORDER:
+## [T+4h] POLICY- OUT OF ORDER:
 - settlement arrives with no auth => PARK IT 
 - When the auth webhook arrives later:
     1. Before creating the hold, check `unmatched_settlements` for this `auth_id`. 
@@ -38,14 +38,14 @@ Table:
 
 - On every webhook: check this table first. If the event_id exists, return 200 and do nothing.
 
-## [T+4h] ACH Returns and Bounced Deposits:
+## [T+4h] POLICY- ACH Returns and Bounced Deposits:
 - Post the reversal entry immediately (immutable ledger, new entry)
 - Account goes negative
 - Freeze the account from further spending
 - Notify the customer
 - The customer sees: A negative balance, a clear "ACH Return - R01 Insufficient Funds" entry, and a frozen card.
 
-## [T+4h] FORCE POSTS:
+## [T+4h] POLICY- FORCE POSTS:
 - A merchant bypasses authorization entirely and submits a settlement directly. - Happens with:
     1. Offline card terminals (on planes, some transit systems)
     2. Certain fuel pumps
@@ -61,3 +61,39 @@ Table:
     1. `RELEASED`
     2. `EXPIRED`
     3. `REVERSED`
+
+## [T+20h] POLICY- STANDING ORDER:
+- Scheduled payments must fire once and only once across restarts and retries.
+- NSF (Insufficient Funds) Rule: If the available balance cannot cover the payment amount, do not overdraft and do not post the ledger entry
+- Mark the execution status and surface an alert to the customer UI.
+- Queue exactly one retry attempt for 24 hours later. If the retry fails, pause the standing order.
+- REASON of 1 retry:
+    1. Customer abandoning
+    2. Providers monitor NSF(Non sufficient fund) rates
+
+
+## [T+20h] FLOW:
+- 3 personas:
+    1. Business owner
+    2. Employee
+    3. Neobank admin
+
+## [T+20h] POLICY- BITEMPORALITY:
+- In case of settlement reversal - A correction that undoes a prior entry with new one
+- There should be 2 dates for each transaction:
+    1. Booking Date: When you learned about the transaction
+    2. Value Date: When it happened
+
+## [T+20h] POLICY- SCHEME RECONCILIATION
+- Nightly file from the processor against your ledger
+    1. in-file-not-ledger
+    2. in-ledger-not-file
+    3. amount mismatch
+
+- Breaks screen with aging
+
+## [T+20h] SANDBOX-FIRST CORE LOOP
+- Persona, Plaid, Stripe Issuing, and Increase default to sandbox mode.
+- A provider may be changed independently to `simulated`; sandbox errors are returned and never trigger simulated success.
+- Standing orders remain in the core loop with one deterministic occurrence per date and exactly one NSF retry after 24 hours.
+- The three dropdown identities are demo authentication; signed cookies and server-side role checks enforce portal isolation.

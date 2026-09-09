@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test --experimental-default-type=module tests/*.test.mjs",
+    "seed": "node --env-file=.env scripts/seed.mjs"
   },
   "dependencies": {
     "next": "16.3.4",

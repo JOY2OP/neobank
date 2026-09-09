@@ -1,36 +1,100 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Corgi neobank core loop
 
-## Getting Started
+Corgi is a US business-banking sandbox demo. Sarah and John share a customer portal; Maya uses a separate Ops console. The login dropdown is intentionally simple demo authentication, but its cookie is signed and every page/action repeats its role check.
 
-First, run the development server:
+No deployment is included.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Local setup
+
+1. Copy `.env.example` to `.env` and replace every placeholder needed by the providers you use.
+2. Apply `supabase-schema.sql` to a new Supabase project.
+3. Apply `supabase-additive-migration.sql` after the main schema.
+4. Run `npm run seed`. It is append-only and safe to repeat.
+5. Run `npm run dev`, then open `http://localhost:3000/login`.
+
+The seed prints actor IDs, the business account ID, balances, and useful demo URLs. It creates Acme Inc., cards, initial funding, a pending approval, card history, a current hold, standing orders, an NSF retry, provider evidence, and all three reconciliation cases.
+
+Use these dropdown identities:
+
+| Login | Role | Access |
+| --- | --- | --- |
+| `sarah@acme.com` | Owner | Full Acme portal and approvals |
+| `john@acme.com` | Maker | His card/activity, payments, and standing orders |
+| `admin@corgi.com` | Ops | Reconciliation, statements, provider log, Demo Lab |
+
+## Provider configuration
+
+All four providers default to `sandbox`. Missing sandbox credentials produce a clear setup error; code never turns an API failure into simulated success. To simulate only one service, set its mode to `simulated`, for example `STRIPE_MODE=simulated`.
+
+`.env.example` documents:
+
+- Supabase: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- Demo security: `DEMO_SESSION_SECRET`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`
+- Persona: mode, API key, template ID, webhook secret
+- Plaid: mode, client ID, sandbox secret, environment
+- Stripe: mode, test secret key, webhook secret
+- Increase: mode, sandbox API key/base URL/account ID/webhook secret
+
+Only use sandbox identities and money. Do not enter real PII, PANs, or CVCs. The Plaid access token is written through a server-only SQL function into the private schema. Customer-visible rows retain masked details and opaque provider IDs.
+
+Configure provider dashboards to call:
+
+```text
+POST /api/webhooks/stripe
+POST /api/webhooks/persona
+POST /api/webhooks/plaid
+POST /api/webhooks/increase
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The scheduler calls `POST /api/cron/standing-orders` with `Authorization: Bearer <CRON_SECRET>`. Locally, Ops can use **Run due standing orders** and **Run NSF retry** in Demo Lab.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+## Code tour
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The code deliberately keeps orchestration visible and uses the SQL functions as the financial command boundary.
 
-## Learn More
+### Card authorization and settlement
 
-To learn more about Next.js, take a look at the following resources:
+1. Stripe sends an Issuing event to `src/app/api/webhooks/stripe/route.js`.
+2. The route verifies the signature against the untouched request body.
+3. `src/lib/provider-events.js` persists the verified delivery before processing, so failures remain visible and the external event ID deduplicates replays.
+4. An authorization calls `record_authorization_event`, creating a computed hold. A capture calls `record_card_settlement`, which posts the journal and releases the hold once.
+5. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Outbound ACH and maker-checker
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. `src/app/app/payments/page.js` submits to `createPaymentAction` in `src/app/actions.js`.
+2. The action validates dollars into integer cents, checks the signed customer identity, then calls `create_payment_request`.
+3. The database snapshots the approval threshold. Above-threshold or agent-created requests wait for a different human; an approval reserves available funds before provider submission.
+4. `src/lib/payments.js` sends the approved transfer through `src/lib/providers/increase.js`, then records `SUBMITTED` with `record_payment_event`.
+5. The Increase webhook appends settlement/return events. A failed sandbox call remains visibly approved and retryable; it is never reported as simulated success.
 
-## Deploy on Vercel
+### Bank funding
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. Plaid Link exchanges its short-lived public token on the server and retrieves Auth details.
+2. Increase tokenizes those routing/account details as an external account.
+3. The owner funding form creates a negative Increase ACH transfer (a pull from the linked bank), while Corgi records a positive inbound amount.
+4. Funds remain pending until Increase reports settlement. A later funding recall reverses the immutable entry, restricts the account, and freezes its cards.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Standing orders
+
+1. `src/lib/standing-orders.js` finds weekly/monthly orders due today.
+2. `create_standing_order_occurrence` uses `order ID + date` as a deterministic key, so restarts cannot fire a date twice.
+3. Available balance is calculated from settled ledger balance minus live card holds and payment reservations; it is not stored.
+4. NSF creates no journal. Exactly one retry is scheduled at least 24 hours later. A second NSF appends `FAILED` and pauses the order.
+5. A funded occurrence creates a normal payment request, so an above-threshold occurrence still enters maker-checker.
+
+## Reconciliation and bitemporal statements
+
+Ops can upload the sample at `public/sample-scheme-file.csv`. The additive migration processes a file atomically and projects `IN_FILE_NOT_LEDGER`, `IN_LEDGER_NOT_FILE`, and `AMOUNT_MISMATCH` with first-seen aging. Duplicate file hashes return the original run.
+
+Statements use `value_date` for the corrected financial day and `booked_at` for the `knowledge_cutoff`. Moving the cutoff backward shows what the system knew before a later reversal arrived.
+
+## Verification
+
+```bash
+npm test
+npm run lint
+npm run build
+```
+
+Database/provider integration tests require an applied Supabase schema and sandbox credentials. The Ops Demo Lab covers authorization, `$73.40` over-capture, reversal, settlement-before-auth, force post, duplicate webhook, ACH return, provider delay, standing-order execution, and NSF retry.
