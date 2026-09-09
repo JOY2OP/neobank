@@ -549,22 +549,25 @@ export async function coreAuthorizeCardAction() {
     requireStripeSandbox();
     const cards = await selectRows("cards", `business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.stripe&order=created_at.desc&limit=1`);
     if (!cards[0]) throw new Error("Issue a Stripe sandbox card first.");
-    const authorization = await createStripeTestAuthorization(cards[0].provider_card_id, 8500);
+    const authorization = await createStripeTestAuthorization(cards[0].provider_card_id, 5000);
     const authorizationEvent = authorization.approved === false ? "DECLINED" : "AUTHORIZED";
     await callRpc("record_authorization_event", {
       p_provider_code: "stripe",
       p_provider_authorization_id: authorization.id,
       p_card_id: cards[0].id,
       p_event_type: authorizationEvent,
-      p_authorized_total_cents: authorization.approved === false ? null : 8500,
+      p_authorized_total_cents: authorization.approved === false ? null : 5000,
       p_occurred_at: new Date((authorization.created || Date.now() / 1000) * 1000).toISOString(),
-      p_idempotency_key: `stripe:authorization:${authorization.id}:${authorizationEvent}:8500`,
+      p_idempotency_key: `stripe:authorization:${authorization.id}:${authorizationEvent}:5000`,
       p_merchant_name: authorization.merchant_data?.name || "Corgi Fuel Stop",
       p_merchant_category_code: authorization.merchant_data?.category_code || "5542",
       p_details: { source: "SANDBOX", triggered_by: "core-loop", actor_id: ops.actorId },
     });
     revalidatePath("/core-loop");
-    return { message: "Stripe authorized $85.00 and Corgi placed the hold." };
+    if (authorizationEvent === "DECLINED") {
+      throw new Error("Stripe declined the $50.00 test authorization. Add USD test funds to the Stripe Issuing balance, then try again.");
+    }
+    return { message: "Stripe authorized $50.00 and Corgi placed the hold." };
   } catch (error) { return resultError(error); }
 }
 
@@ -572,8 +575,11 @@ export async function coreSettleCardAction() {
   try {
     const ops = await requireOps();
     requireStripeSandbox();
-    const auths = await selectRows("card_authorizations", "provider_code=eq.stripe&order=first_seen_at.desc&limit=1");
-    if (!auths[0]) throw new Error("Create the Stripe authorization first.");
+    const activeHolds = await selectRows("active_card_holds", `business_account_id=eq.${DEMO_IDS.account}&order=last_recorded_at.desc`);
+    if (!activeHolds.length) throw new Error("Create an approved Stripe authorization with an active hold first.");
+    const activeAuthorizationIds = activeHolds.map((hold) => hold.authorization_id).join(",");
+    const auths = await selectRows("card_authorizations", `id=in.(${activeAuthorizationIds})&provider_code=eq.stripe&order=first_seen_at.desc&limit=1`);
+    if (!auths[0]) throw new Error("No active hold belongs to a Stripe authorization.");
     const captured = await captureStripeAuthorization(auths[0].provider_authorization_id, 7340);
     const transactionId = captured.transactions?.at(-1);
     if (!transactionId) throw new Error("Stripe accepted capture but did not return its transaction yet. Reload after the webhook arrives.");
@@ -594,7 +600,7 @@ export async function coreSettleCardAction() {
       p_actor_id: ops.actorId,
     });
     revalidatePath("/core-loop");
-    return { message: "Stripe settled $73.40; Corgi released the $85 hold and booked the two-day-later value date." };
+    return { message: "Stripe settled $73.40; Corgi released the $50 hold and booked the two-day-later value date." };
   } catch (error) { return resultError(error); }
 }
 

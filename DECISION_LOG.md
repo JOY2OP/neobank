@@ -106,3 +106,32 @@ Table:
 
 ## [T+25h] Stripe `treasury card` feature shows "We're setting up your account. We'll email you when it's ready" error. 
 - Going with simulated with this one too.
+
+## [T+30h] 18-HOUR FREEZE PLAN
+- The core loop is the end-to-end demo script, not a customer or operations navigation item. Keep any executable runbook off the primary sidebar.
+- Freeze the submission around the immutable ledger, holds, Stripe-style card lifecycle, maker-checker ACH, bitemporal statements, and reconciliation.
+- Cut USDC, wires, native mobile, the general public API, full statement artifacts, and all stretch-ladder features. The detailed rationale and week-two plan live in `CUTLIST.md`.
+- Remove USDC/internal-transfer specialization from the fresh-install schema. A future rail should arrive through the generic payment/provider-event boundary rather than as speculative v0 tables.
+- Persona remains simulated because sandbox access is sales-gated. Never present it as live.
+- Customer-facing balances come only from Supabase ledger projections. Plaid, Increase, and Stripe contribute verified external events; their balances are not Corgi's customer balance.
+
+## [T+31h] STRIPE ISSUING-ONLY
+- The earlier Stripe blocker was the Treasury/Financial Account provisioning path, not the Issuing card lifecycle required by the track.
+- Switch the adapter to Issuing-only test mode: create a cardholder and virtual card without `financial_account_v2`.
+- Fund Stripe's sandbox Issuing balance separately as provider test liquidity. It is never shown as, or synchronized into, Acme's Corgi balance.
+- Keep the existing signed authorization/transaction webhooks, $50 hold, $73.40 capture, refund, and Supabase ledger behavior unchanged.
+
+## [T+32h] STRIPE SANDBOX REQUIRES A V2 FINANCIAL ACCOUNT
+- Local card creation returned `The v2 financial account id must be specified`; the active Stripe sandbox is provisioned for Issuing backed by a v2 Financial Account, so the Issuing-only assumption above does not apply to this account.
+- Restore `financial_account_v2` on card creation. Resolve the configured sandbox account or discover the first open account through Stripe's v2 API.
+- The Stripe Financial Account is provider-side test liquidity only. Acme's customer-facing ledger and available balance remain derived exclusively from Supabase.
+- A zero provider balance may allow card creation but will decline the live-fire authorization; add sandbox funds before the $50 test.
+
+## [T+33h] FINAL STRIPE FUNDING MODEL: STANDALONE ISSUING
+- Stripe's generic Issuing model does not require a Financial Account; omitting the parameter makes cards draw from the standalone Issuing balance.
+- Read-only inspection showed the current sandbox key has no `issuing` object in `/v1/balance`. That sandbox was provisioned for the Financial Accounts model, which caused Stripe to demand `financial_account_v2`.
+- The application now deliberately rejects that account configuration and requires a sandbox key with standalone Issuing enabled. No Treasury or Financial Account API, ID, or card parameter remains in the implementation.
+- Before creating a test authorization, verify the standalone USD Issuing balance can cover the requested amount. Acme's customer balance remains the independent Supabase ledger.
+
+
+## [T+35h] Unable to setup STANDALONE ISSUING

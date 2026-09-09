@@ -3,11 +3,19 @@ import "server-only";
 import { providerMode, requiredEnv } from "./config";
 import { simulatedId } from "./simulator";
 
+function stripeTestKey() {
+  const key = requiredEnv("STRIPE_SECRET_KEY");
+  if (!key.startsWith("sk_test_")) {
+    throw new Error("STRIPE_SECRET_KEY must be a Stripe test-mode secret key (sk_test_...).");
+  }
+  return key;
+}
+
 async function stripeRequest(path, parameters) {
   const response = await fetch(`https://api.stripe.com/v1${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${requiredEnv("STRIPE_SECRET_KEY")}`,
+      Authorization: `Bearer ${stripeTestKey()}`,
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: new URLSearchParams(parameters),
@@ -19,7 +27,7 @@ async function stripeRequest(path, parameters) {
 
 async function stripeGet(path) {
   const response = await fetch(`https://api.stripe.com/v1${path}`, {
-    headers: { Authorization: `Bearer ${requiredEnv("STRIPE_SECRET_KEY")}` },
+    headers: { Authorization: `Bearer ${stripeTestKey()}` },
     cache: "no-store",
   });
   const data = await response.json();
@@ -27,20 +35,19 @@ async function stripeGet(path) {
   return data;
 }
 
-async function retrieveFinancialAccount(financialAccountId) {
-  const response = await fetch(`https://api.stripe.com/v2/money_management/financial_accounts/${financialAccountId}`, {
-    headers: {
-      Authorization: `Bearer ${requiredEnv("STRIPE_SECRET_KEY")}`,
-      "Stripe-Version": "2026-08-26.preview",
-    },
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(`Stripe sandbox error: ${data.error?.message || response.statusText}`);
-  return data;
+async function getStripeIssuingBalance() {
+  const balance = await stripeGet("/balance");
+  if (balance.livemode) throw new Error("Stripe returned a live-mode balance; only sandbox Issuing is allowed.");
+  if (!balance.issuing) {
+    throw new Error(
+      "This Stripe sandbox has no standalone Issuing balance. Activate standalone Issuing in a sandbox (not Financial Accounts/Treasury), use that sandbox's sk_test key, and restart the app.",
+    );
+  }
+  return balance.issuing.available?.find((item) => item.currency === "usd")?.amount || 0;
 }
 
-// Stripe owns card issuance and produces card-network events. Our webhook turns
-// those events into holds and immutable ledger entries in Supabase.
+// Standalone Stripe Issuing uses the account's Issuing balance. Treasury and
+// Financial Accounts are deliberately absent; Corgi owns the customer ledger.
 export async function issueStripeCard({ name, email, phoneNumber, actorId, acceptedTermsAt, acceptedTermsIp, acceptedTermsUserAgent }) {
   if (providerMode("stripe") === "simulated") {
     return {
@@ -56,12 +63,7 @@ export async function issueStripeCard({ name, email, phoneNumber, actorId, accep
   const lastName = nameParts.join(" ");
   if (!firstName || !lastName) throw new Error("Stripe cardholders need a first and last name.");
 
-  const financialAccountId = requiredEnv("STRIPE_FINANCIAL_ACCOUNT_ID");
-  const financialAccount = await retrieveFinancialAccount(financialAccountId);
-  if (financialAccount.livemode) throw new Error("STRIPE_FINANCIAL_ACCOUNT_ID must reference a test-mode account.");
-  if (financialAccount.status !== "open") {
-    throw new Error(`Stripe test Financial Account is ${financialAccount.status}. Finish Stripe test-mode onboarding and wait for it to become open before issuing cards.`);
-  }
+  await getStripeIssuingBalance();
 
   const cardholder = await stripeRequest("/issuing/cardholders", {
     type: "individual",
@@ -81,20 +83,26 @@ export async function issueStripeCard({ name, email, phoneNumber, actorId, accep
     "billing[address][country]": "US",
     "metadata[actor_id]": actorId,
   });
+  if (cardholder.livemode) throw new Error("Stripe returned a live-mode cardholder; only sandbox Issuing is allowed.");
+
   const card = await stripeRequest("/issuing/cards", {
     cardholder: cardholder.id,
-    financial_account_v2: financialAccountId,
     currency: "usd",
     type: "virtual",
     status: "active",
     "metadata[actor_id]": actorId,
   });
+  if (card.livemode) throw new Error("Stripe returned a live-mode card; only sandbox Issuing is allowed.");
   return { cardholderId: cardholder.id, cardId: card.id, last4: card.last4, source: "SANDBOX" };
 }
 
 export async function createStripeTestAuthorization(cardId, amountCents) {
   if (providerMode("stripe") === "simulated") {
     return { id: simulatedId("iauth"), amount: amountCents, source: "SIMULATED" };
+  }
+  const availableCents = await getStripeIssuingBalance();
+  if (availableCents < amountCents) {
+    throw new Error(`Stripe's standalone Issuing balance has ${availableCents} cents available; add test USD funds before authorizing ${amountCents} cents.`);
   }
   const authorization = await stripeRequest("/test_helpers/issuing/authorizations", {
     card: cardId,

@@ -17,7 +17,7 @@ create type public.environment_kind as enum ('TEST', 'SANDBOX', 'SIMULATED');
 create type public.processing_outcome as enum ('SUCCEEDED', 'RETRYABLE_FAILURE', 'TERMINAL_FAILURE');
 create type public.account_class as enum ('ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE');
 create type public.posting_side as enum ('DEBIT', 'CREDIT');
-create type public.payment_direction as enum ('INBOUND', 'OUTBOUND', 'INTERNAL');
+create type public.payment_direction as enum ('INBOUND', 'OUTBOUND');
 create type public.approval_decision as enum ('APPROVED', 'REJECTED');
 create type public.reconciliation_break_type as enum ('IN_FILE_NOT_LEDGER', 'IN_LEDGER_NOT_FILE', 'AMOUNT_MISMATCH');
 
@@ -43,16 +43,12 @@ insert into public.providers (code, display_name) values
   ('persona', 'Persona'),
   ('plaid', 'Plaid'),
   ('increase', 'Increase'),
-  ('circle', 'Circle'),
-  ('bridge', 'Bridge'),
   ('simulator', 'V0 Simulator')
 on conflict (code) do nothing;
 
 insert into public.payment_rails (code, display_name) values
   ('ACH', 'Automated Clearing House'),
-  ('CARD', 'Card Network'),
-  ('USDC', 'USD Coin'),
-  ('INTERNAL', 'Internal Ledger Transfer')
+  ('CARD', 'Card Network')
 on conflict (code) do nothing;
 
 -- -----------------------------------------------------------------------------
@@ -388,7 +384,7 @@ create table public.card_settlement_journal_links (
 );
 
 -- -----------------------------------------------------------------------------
--- Beneficiaries, payments, approval, ACH, and USDC
+-- Beneficiaries, payments, approval, and ACH
 -- -----------------------------------------------------------------------------
 
 create table public.beneficiaries (
@@ -396,15 +392,10 @@ create table public.beneficiaries (
   organization_id uuid not null references public.organizations(id) on delete restrict,
   rail_code text not null references public.payment_rails(code) on delete restrict,
   display_name text not null check (length(btrim(display_name)) > 0),
-  provider_recipient_reference text,
+  provider_recipient_reference text not null,
   account_mask text check (account_mask is null or account_mask ~ '^[0-9]{2,4}$'),
-  wallet_address text,
   created_at timestamptz not null default clock_timestamp(),
-  check (
-    (rail_code = 'ACH' and provider_recipient_reference is not null and wallet_address is null)
-    or (rail_code = 'USDC' and wallet_address is not null)
-    or (rail_code not in ('ACH', 'USDC'))
-  )
+  check (rail_code = 'ACH')
 );
 
 create table public.payment_requests (
@@ -488,21 +479,6 @@ create table public.ach_payment_events (
   sec_code text,
   created_at timestamptz not null default clock_timestamp()
 );
-
-create table public.usdc_payment_events (
-  payment_event_id uuid primary key references public.payment_events(id) on delete restrict,
-  atomic_amount numeric(78, 0) not null check (atomic_amount > 0),
-  asset_code text not null default 'USDC' check (asset_code = 'USDC'),
-  network text not null check (length(btrim(network)) > 0),
-  wallet_address text not null check (length(btrim(wallet_address)) > 0),
-  quote_reference text,
-  transaction_hash text,
-  created_at timestamptz not null default clock_timestamp()
-);
-
-create unique index usdc_payment_events_network_tx_uidx
-  on public.usdc_payment_events (network, transaction_hash)
-  where transaction_hash is not null;
 
 -- -----------------------------------------------------------------------------
 -- Standing orders
@@ -694,7 +670,7 @@ begin
     'card_hold_events', 'card_settlements', 'card_settlement_events',
     'card_settlement_matches', 'card_settlement_journal_links',
     'payment_requests', 'payment_approval_events', 'payments', 'payment_events',
-    'payment_reservation_events', 'ach_payment_events', 'usdc_payment_events',
+    'payment_reservation_events', 'ach_payment_events',
     'standing_orders', 'standing_order_events', 'standing_order_occurrences',
     'standing_order_attempt_events', 'statement_versions',
     'reconciliation_runs', 'reconciliation_file_rows', 'reconciliation_results',
@@ -1976,8 +1952,8 @@ begin
   if p_amount_cents <= 0 then
     raise exception 'payment amount must be positive cents' using errcode = '22023';
   end if;
-  if p_rail_code not in ('ACH', 'USDC', 'INTERNAL') then
-    raise exception 'unsupported outbound payment rail' using errcode = '22023';
+  if p_rail_code <> 'ACH' then
+    raise exception 'only ACH outbound payments are supported in v0' using errcode = '22023';
   end if;
 
   select * into v_existing
@@ -2342,18 +2318,6 @@ begin
       p_rail_details ->> 'ach_return_code',
       p_rail_details ->> 'sec_code'
     );
-  elsif p_rail_code = 'USDC' and p_rail_details <> '{}'::jsonb then
-    insert into public.usdc_payment_events (
-      payment_event_id, atomic_amount, network, wallet_address,
-      quote_reference, transaction_hash
-    ) values (
-      v_event_id,
-      (p_rail_details ->> 'atomic_amount')::numeric,
-      p_rail_details ->> 'network',
-      p_rail_details ->> 'wallet_address',
-      p_rail_details ->> 'quote_reference',
-      p_rail_details ->> 'transaction_hash'
-    );
   end if;
 
   if p_event_type = 'RECALLED' and private.available_balance(p_business_account_id) < 0 then
@@ -2508,7 +2472,7 @@ begin
     'card_settlement_matches', 'card_settlement_journal_links',
     'beneficiaries', 'payment_requests', 'payment_approval_events', 'payments',
     'payment_events', 'payment_reservation_events', 'ach_payment_events',
-    'usdc_payment_events', 'standing_orders', 'standing_order_events',
+    'standing_orders', 'standing_order_events',
     'standing_order_occurrences', 'standing_order_attempt_events',
     'statement_versions', 'reconciliation_runs', 'reconciliation_file_rows',
     'reconciliation_results', 'reconciliation_break_events'

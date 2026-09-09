@@ -140,7 +140,7 @@ export async function getStatement({ start, end, knownAt }) {
 }
 
 export async function getCoreLoopState() {
-  const [kybCases, kybEvents, businessEvents, banks, bankEvents, payments, paymentStatuses, cards, authorizations, settlements, settlementEvents, requests, runs, breaks] = await Promise.all([
+  const [kybCases, kybEvents, businessEvents, banks, bankEvents, payments, paymentStatuses, cards, authorizations, activeHolds, settlements, settlementEvents, requests, runs, breaks] = await Promise.all([
     selectRows("kyb_cases", `select=*&organization_id=eq.${DEMO_IDS.organization}&provider_code=eq.persona&order=created_at.desc`),
     selectRows("kyb_events", "select=*&order=recorded_at.desc"),
     selectRows("business_account_events", `select=*&business_account_id=eq.${DEMO_IDS.account}&event_type=eq.OPENED&order=recorded_at.desc`),
@@ -150,6 +150,7 @@ export async function getCoreLoopState() {
     selectRows("current_payment_status", "select=*"),
     selectRows("cards", `select=*&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.stripe&order=created_at.desc`),
     selectRows("card_authorizations", "select=*&provider_code=eq.stripe&order=first_seen_at.desc"),
+    selectRows("active_card_holds", `select=*&business_account_id=eq.${DEMO_IDS.account}&order=last_recorded_at.desc`),
     selectRows("card_settlements", "select=*&provider_code=eq.stripe&order=recorded_at.desc"),
     selectRows("card_settlement_events", "select=*&event_type=eq.REVERSED&order=recorded_at.desc"),
     selectRows("payment_request_status", `select=*&business_account_id=eq.${DEMO_IDS.account}&initiated_by_actor_id=eq.${DEMO_IDS.john}&order=created_at.desc`),
@@ -158,7 +159,8 @@ export async function getCoreLoopState() {
   ]);
   const caseIds = new Set(kybCases.map((item) => item.id));
   const cardIds = new Set(cards.map((item) => item.id));
-  const auth = authorizations.find((item) => cardIds.has(item.card_id));
+  const activeAuthorizationIds = new Set(activeHolds.map((item) => item.authorization_id));
+  const auth = authorizations.find((item) => cardIds.has(item.card_id) && activeAuthorizationIds.has(item.id));
   const settlement = settlements.find((item) => cardIds.has(item.card_id));
   const reversedIds = new Set(settlementEvents.map((item) => item.settlement_id));
   const outbound = payments.find((item) => item.direction === "OUTBOUND" && item.provider_code === "increase");

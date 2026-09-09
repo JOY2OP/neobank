@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { providerSummary } from "@/app/actions";
-import { BalanceCard, EmptyState, ProviderBadge, SectionHeading, SetupNotice, StatusPill } from "@/components/ui";
+import { BalanceCard, EmptyState, SectionHeading, SetupNotice, StatusPill } from "@/components/ui";
 import { getCustomerDashboard } from "@/lib/data";
 import { formatDate, formatUsd } from "@/lib/money";
 import { requireCustomer } from "@/lib/session";
@@ -8,7 +7,6 @@ import { requireCustomer } from "@/lib/session";
 export default async function CustomerOverview() {
   const user = await requireCustomer();
   const data = await getCustomerDashboard(user);
-  const providers = await providerSummary();
   const balance = data.balance || {};
 
   return (
@@ -17,7 +15,6 @@ export default async function CustomerOverview() {
         eyebrow="Acme Inc. · Business checking"
         title={`Good morning, ${user.name.split(" ")[0]}`}
         description={user.role === "OWNER" ? "Here is Acme's provable cash position." : "Here is your card and payment activity."}
-        action={<div className="provider-row">{providers.map((item) => <ProviderBadge key={item.name} mode={item.mode} />)}</div>}
       />
       <SetupNotice error={data.error} />
       {data.accountStatus?.status === "RESTRICTED" ? <div className="notice notice-error"><strong>Account restricted</strong><span>An ACH funding return removed settled money. Payments and card spending are frozen while Ops reviews the account.</span></div> : null}

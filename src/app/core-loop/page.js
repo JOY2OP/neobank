@@ -29,7 +29,7 @@ export default async function CoreLoopPage() {
   if (!user) redirect("/login");
   const state = await getCoreLoopState();
   const isOwner = user.portal === "customer" && user.role === "OWNER";
-  const isEmployee = user.portal === "customer" && user.role === "EMPLOYEE";
+  const isEmployee = user.portal === "customer" && user.role === "MAKER";
   const isOps = user.portal === "ops";
   const kybDone = state.kyb?.event_type === "APPROVED" && state.accountOpened;
   const bankDone = Boolean(state.bank && state.bankEvent?.details?.increase_external_account_id);
@@ -58,8 +58,8 @@ export default async function CoreLoopPage() {
           {isOwner ? <Link className="button button-secondary" href="/app/cards">Issue Stripe card</Link> : <p className="core-instruction">Switch to Sarah Chen to issue the card.</p>}
         </Step>
 
-        <Step number="4" title="Authorize $85, then settle $73.40 two days later" done={settlementDone} blocked={!cardDone || state.modes.stripe !== "sandbox"} detail={settlementDone ? `Settlement ${state.settlement.provider_settlement_id} booked ${formatUsd(state.settlement.amount_cents)} on value date ${state.settlement.value_date}.` : authDone ? `Authorization ${state.authorization.provider_authorization_id} has an active hold. Capture it for a different amount.` : "Stripe test helpers create the card-network authorization; Corgi records its hold before settlement."}>
-          {isOps ? <ActionForm action={authDone ? coreSettleCardAction : coreAuthorizeCardAction} submitLabel={authDone ? "Settle $73.40" : "Authorize $85.00"} className="core-action" /> : <p className="core-instruction">Switch to Maya Rodriguez after the Stripe card exists.</p>}
+        <Step number="4" title="Authorize $50, then settle $73.40 two days later" done={settlementDone} blocked={!cardDone || state.modes.stripe !== "sandbox"} detail={settlementDone ? `Settlement ${state.settlement.provider_settlement_id} booked ${formatUsd(state.settlement.amount_cents)} on value date ${state.settlement.value_date}.` : authDone ? `Authorization ${state.authorization.provider_authorization_id} has an active hold. Capture it for a different amount.` : "Stripe test helpers create the card-network authorization; Corgi records its hold before settlement."}>
+          {isOps ? <ActionForm action={authDone ? coreSettleCardAction : coreAuthorizeCardAction} submitLabel={authDone ? "Settle $73.40" : "Authorize $50.00"} className="core-action" /> : <p className="core-instruction">Switch to Maya Patel after the Stripe card exists.</p>}
         </Step>
 
         <Step number="5" title="Send an outbound ACH with a second approver" done={outboundDone} blocked={!settlementDone || !bankDone} detail={outboundDone ? `Approved Increase transfer ${state.outbound.provider_payment_id} is ${state.outbound.status}.` : !settlementDone ? "Complete the different-amount card settlement first." : state.outboundRequest ? `John's request is ${state.outboundRequest.status}. ${approvalDone ? "Provider submission is ready or in progress." : "Sarah must approve it."}` : "John creates an above-threshold ACH. Sarah must approve it; the maker cannot approve their own request."}>
@@ -67,11 +67,11 @@ export default async function CoreLoopPage() {
         </Step>
 
         <Step number="6" title="Survive a reversed card settlement" done={state.reversal} blocked={!outboundDone || !settlementDone || state.modes.stripe !== "sandbox"} detail={state.reversal ? "The original journal entry remains immutable; an equal and opposite correction was appended on the original value date." : !outboundDone ? "Complete the maker-checker outbound payment first." : "Refund the Stripe capture and append—not mutate—the accounting reversal."}>
-          {isOps ? <ActionForm action={coreReverseSettlementAction} submitLabel="Reverse in Stripe" className="core-action" /> : <p className="core-instruction">Switch to Maya Rodriguez to trigger the Stripe refund.</p>}
+          {isOps ? <ActionForm action={coreReverseSettlementAction} submitLabel="Reverse in Stripe" className="core-action" /> : <p className="core-instruction">Switch to Maya Patel to trigger the Stripe refund.</p>}
         </Step>
 
         <Step number="7" title="Reconcile the Stripe scheme file" done={reconDone} blocked={!state.reversal} detail={reconDone ? `Run ${state.reconciliation.id} completed with ${state.breaks.length} currently open break(s).` : !state.reversal ? "Append the reversal before reconciling the processor file." : "Generate the scheme row from Stripe's settlement reference and compare it with the immutable ledger posting."}>
-          {isOps ? <ActionForm action={coreReconcileAction} submitLabel="Generate and reconcile file" className="core-action" /> : <p className="core-instruction">Switch to Maya Rodriguez to run reconciliation.</p>}
+          {isOps ? <ActionForm action={coreReconcileAction} submitLabel="Generate and reconcile file" className="core-action" /> : <p className="core-instruction">Switch to Maya Patel to run reconciliation.</p>}
         </Step>
       </div>
     </AppShell>

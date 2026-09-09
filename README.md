@@ -36,10 +36,23 @@ All four providers default to `sandbox`. Missing sandbox credentials produce a c
 - Demo security: `DEMO_SESSION_SECRET`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`
 - Persona: mode, API key, template ID, webhook secret
 - Plaid: mode, client ID, sandbox secret, environment
-- Stripe: mode, test Financial Account ID, test secret key, webhook secret
+- Standalone Stripe Issuing: mode, test secret key, webhook secret
 - Increase: mode, sandbox API key/base URL/account ID/webhook secret
 
 Only use sandbox identities and money. Do not enter real PII, PANs, or CVCs. The Plaid access token is written through a server-only SQL function into the private schema. Customer-visible rows retain masked details and opaque provider IDs.
+
+### Stripe Issuing local setup
+
+The application uses standalone Stripe Issuing and its Issuing balance. It does not use Treasury, Cards attached to Financial Accounts, or any `financial_account` card parameter.
+
+1. Create or select a Stripe sandbox with standalone Issuing enabled. `GET /v1/balance` for its test key must contain an `issuing` object. A sandbox whose Issuing page only shows **Financial account balance** is using the wrong funding model for this project.
+2. Add test USD funds to the standalone Issuing balance.
+3. Set `STRIPE_MODE=sandbox` and put that sandbox's `sk_test_...` key in `STRIPE_SECRET_KEY`.
+4. Forward Stripe sandbox events to `http://localhost:3000/api/webhooks/stripe` and put the resulting `whsec_...` value in `STRIPE_WEBHOOK_SECRET`.
+5. Restart the app, sign in as Sarah, and issue a virtual card from `/app/cards`.
+6. Sign in as Maya and use the direct `/core-loop` runbook to authorize $50.00, capture $73.40, and refund the capture.
+
+The customer balance remains derived from Supabase journal entries. Stripe's standalone Issuing balance is provider-side test liquidity only.
 
 Configure provider dashboards to call:
 

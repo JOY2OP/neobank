@@ -3,7 +3,6 @@ import { formatUsd } from "@/lib/money";
 export function Brand() {
   return (
     <div className="brand">
-      <span className="brand-dog" aria-hidden="true">◖ᴥ◗</span>
       <span>Corgi</span>
       <small>Business banking</small>
     </div>
@@ -32,7 +31,6 @@ export function BalanceCard({ label, cents, note, accent = false }) {
 export function EmptyState({ title, children }) {
   return (
     <div className="empty-state">
-      <span aria-hidden="true">◇</span>
       <strong>{title}</strong>
       <p>{children}</p>
     </div>
