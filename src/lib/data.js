@@ -120,27 +120,39 @@ export async function getApprovalQueue() {
 
 export async function getOpsDashboard() {
   if (!isSupabaseConfigured()) return { configured: false, error: "Add the Supabase values from .env.example." };
-  try {
-    const [events, statuses, runs, breaks, settlements, orders] = await Promise.all([
-      selectRows("provider_events", "select=*&order=received_at.desc&limit=50"),
-      selectRows("current_provider_event_status", "select=*"),
-      selectRows("reconciliation_runs", "select=*&order=started_at.desc&limit=20"),
-      selectRows("latest_reconciliation_breaks", "select=*&order=age_days.desc"),
-      selectRows("card_settlements", "select=*&order=recorded_at.desc&limit=30"),
-      selectRows("current_standing_orders", "select=*&order=created_at.desc"),
-    ]);
-    const statusMap = new Map(statuses.map((status) => [status.provider_event_id, status]));
-    return {
-      configured: true,
-      events: events.map((event) => ({ ...event, processing: statusMap.get(event.id) })),
-      runs,
-      breaks,
-      settlements,
-      orders,
-    };
-  } catch (error) {
-    return { configured: true, error: error.message };
+  const names = ["provider deliveries", "processing outcomes", "reconciliation runs", "reconciliation breaks", "settlements", "standing orders"];
+  const settled = await Promise.allSettled([
+    selectRows("provider_events", "select=*&order=received_at.desc&limit=50"),
+    selectRows("current_provider_event_status", "select=*"),
+    selectRows("reconciliation_runs", "select=*&order=started_at.desc&limit=20"),
+    selectRows("latest_reconciliation_breaks", "select=*&order=age_days.desc"),
+    selectRows("card_settlements", "select=*&order=recorded_at.desc&limit=30"),
+    selectRows("current_standing_orders", "select=*&order=created_at.desc"),
+  ]);
+  const values = settled.map((item) => item.status === "fulfilled" ? item.value : []);
+  const issues = settled.flatMap((item, index) => item.status === "rejected"
+    ? [`${names[index]} unavailable: ${item.reason?.message || "unknown error"}`]
+    : []);
+  if (issues.length === settled.length) {
+    return { configured: true, error: "Operations data is temporarily unavailable. Financial state was not changed." };
   }
+
+  const [events, statuses, runs, breaks, settlements, orders] = values;
+  const statusMap = new Map(statuses.map((status) => [status.provider_event_id, status]));
+  const enrichedEvents = events.map((event) => ({ ...event, processing: statusMap.get(event.id) }));
+  return {
+    configured: true,
+    events: enrichedEvents,
+    runs,
+    breaks,
+    settlements,
+    orders,
+    issues,
+    degradedProviders: enrichedEvents
+      .filter((event) => ["RETRYABLE_FAILURE", "TERMINAL_FAILURE"].includes(event.processing?.status))
+      .map((event) => event.provider_code)
+      .filter((provider, index, providers) => providers.indexOf(provider) === index),
+  };
 }
 
 export async function getStatement({ start, end, knownAt }) {

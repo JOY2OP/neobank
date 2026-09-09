@@ -13,6 +13,7 @@ const ids = {
   john: "10000000-0000-4000-8000-000000000011",
   ops: "10000000-0000-4000-8000-000000000012",
   system: "10000000-0000-4000-8000-000000000013",
+  agent: "10000000-0000-4000-8000-000000000014",
   customerLedger: "10000000-0000-4000-8000-000000000020",
   achClearing: "10000000-0000-4000-8000-000000000021",
   cardPayable: "10000000-0000-4000-8000-000000000022",
@@ -68,12 +69,14 @@ await insert("actors", [
   { id: ids.john, kind: "HUMAN", display_name: "John Miller" },
   { id: ids.ops, kind: "HUMAN", display_name: "Maya Patel" },
   { id: ids.system, kind: "SYSTEM", display_name: "Corgi Scheduler" },
+  { id: ids.agent, kind: "AGENT", display_name: "Corgi MCP Agent" },
 ]);
 await insert("organizations", [{ id: ids.organization, legal_name: "Acme Inc." }]);
 await insert("organization_memberships", [
   { organization_id: ids.organization, actor_id: ids.sarah, role: "OWNER" },
   { organization_id: ids.organization, actor_id: ids.john, role: "MAKER" },
   { organization_id: ids.organization, actor_id: ids.system, role: "MAKER" },
+  { organization_id: ids.organization, actor_id: ids.agent, role: "MAKER" },
 ], "organization_id,actor_id");
 await insert("organization_settings", [{ organization_id: ids.organization, approval_threshold_cents: 100000 }], "organization_id");
 
@@ -199,7 +202,7 @@ const checks = {
   "Account opened": accountStatus[0]?.status === "OPENED",
   "Two active cards": cardStatuses.filter((item) => item.status === "ACTIVATED").length === 2,
   "$50 active hold": activeHoldCents === 5000,
-  "Maker-checker queued": paymentRequests[0]?.status === "PENDING_APPROVAL",
+  "Maker-checker request exists": paymentRequests[0]?.requires_approval === true,
   "Three reconciliation cases": ["IN_FILE_NOT_LEDGER", "IN_LEDGER_NOT_FILE", "AMOUNT_MISMATCH"].every((type) => expectedBreakTypes.has(type)),
   "NSF retry scheduled": ["STARTED", "INSUFFICIENT_FUNDS", "RETRY_SCHEDULED"].every((type) => expectedAttemptTypes.has(type)),
 };

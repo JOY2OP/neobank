@@ -134,4 +134,17 @@ Table:
 - Before creating a test authorization, verify the standalone USD Issuing balance can cover the requested amount. Acme's customer balance remains the independent Supabase ledger.
 
 
-## [T+35h] Unable to setup STANDALONE ISSUING
+## [T+33h] Unable to setup STANDALONE ISSUING
+
+## [T+33h] MCP AND PROVIDER DEGRADATION
+- Add a stdio MCP surface with five read tools and one payment-request write tool.
+- Give the MCP principal database kind `AGENT`; the existing command boundary forces every agent request into human approval regardless of amount. The MCP cannot approve or submit it.
+- Make provider retry behavior recoverable: failed payloads were already stored, but a duplicate delivery previously returned success without retrying processing. A replay after `RETRYABLE_FAILURE` now reprocesses the same event and appends an attempt; a replay after success remains a no-op.
+- Keep the last verified ledger state during provider or partial Ops-read failure. Never switch to simulator mode automatically, and show the degraded state and error in Ops.
+- Expose signature verification, processing outcome, attempt count, and retry count in the webhook delivery log for interview evidence.
+
+## [T+33h] SUPPORT THE STRIPE SANDBOX ACTUALLY PROVISIONED
+- Fresh API inspection of both available Stripe sandboxes showed Issuing enabled, but each v2 Financial Account is `pending` with a zero balance. Creating a card without `financial_account_v2` returns `parameter_missing`; passing the discovered account returns a precise `status is pending` error.
+- Support both Stripe funding models instead of asserting standalone-only: prefer the standalone Issuing balance when present, otherwise use the configured or first open v2 Financial Account.
+- This does not make Stripe the customer ledger. Its balance only funds Stripe's test card; customer ledger and available balance remain Corgi projections.
+- Card lifecycle code is ready, but sandbox activation and test funding are external prerequisites and must be completed in Stripe before presenting Issuing as live.

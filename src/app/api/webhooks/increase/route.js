@@ -1,4 +1,4 @@
-import { recordProcessingAttempt, storeProviderEvent } from "@/lib/provider-events";
+import { recordProcessingAttempt, shouldProcessProviderEvent, storeProviderEvent } from "@/lib/provider-events";
 import { recordIncreaseAchTransfer } from "@/lib/increase-events";
 import { requiredEnv } from "@/lib/providers/config";
 import { retrieveIncreaseObject } from "@/lib/providers/increase";
@@ -17,7 +17,10 @@ export async function POST(request) {
     createdAt: event.created_at,
     payload: event,
   });
-  if (!stored.inserted) return Response.json({ received: true, replay: true });
+  const replay = !stored.inserted;
+  if (replay && !(await shouldProcessProviderEvent(stored.provider_event_id))) {
+    return Response.json({ received: true, replay: true });
+  }
 
   try {
     if (event.associated_object_type === "ach_transfer") {
@@ -30,7 +33,7 @@ export async function POST(request) {
       });
     }
     await recordProcessingAttempt(stored.provider_event_id, "SUCCEEDED");
-    return Response.json({ received: true });
+    return Response.json({ received: true, replay, retried: replay });
   } catch (error) {
     await recordProcessingAttempt(stored.provider_event_id, "RETRYABLE_FAILURE", error);
     return Response.json({ error: error.message }, { status: 500 });

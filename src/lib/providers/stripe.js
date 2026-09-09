@@ -35,19 +35,50 @@ async function stripeGet(path) {
   return data;
 }
 
-async function getStripeIssuingBalance() {
-  const balance = await stripeGet("/balance");
-  if (balance.livemode) throw new Error("Stripe returned a live-mode balance; only sandbox Issuing is allowed.");
-  if (!balance.issuing) {
-    throw new Error(
-      "This Stripe sandbox has no standalone Issuing balance. Activate standalone Issuing in a sandbox (not Financial Accounts/Treasury), use that sandbox's sk_test key, and restart the app.",
-    );
-  }
-  return balance.issuing.available?.find((item) => item.currency === "usd")?.amount || 0;
+async function stripeV2Get(path) {
+  const response = await fetch(`https://api.stripe.com/v2${path}`, {
+    headers: {
+      Authorization: `Bearer ${stripeTestKey()}`,
+      "Stripe-Version": "2026-08-26.preview",
+    },
+    cache: "no-store",
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(`Stripe sandbox error: ${data.error?.message || response.statusText}`);
+  return data;
 }
 
-// Standalone Stripe Issuing uses the account's Issuing balance. Treasury and
-// Financial Accounts are deliberately absent; Corgi owns the customer ledger.
+async function getStripeFundingSource() {
+  const balance = await stripeGet("/balance");
+  if (balance.livemode) throw new Error("Stripe returned a live-mode balance; only sandbox Issuing is allowed.");
+  if (balance.issuing) {
+    return {
+      type: "issuing_balance",
+      availableCents: Number(balance.issuing.available?.find((item) => item.currency === "usd")?.amount || 0),
+      cardParameters: {},
+    };
+  }
+
+  const configuredId = process.env.STRIPE_FINANCIAL_ACCOUNT_ID;
+  const financialAccounts = configuredId
+    ? [await stripeV2Get(`/money_management/financial_accounts/${configuredId}`)]
+    : (await stripeV2Get("/money_management/financial_accounts?limit=20")).data || [];
+  const financialAccount = financialAccounts.find((item) => item.status === "open");
+  if (!financialAccount) {
+    const pending = financialAccounts.find((item) => item.status === "pending");
+    throw new Error(pending
+      ? `Stripe Financial Account ${pending.id} is pending. Finish Card issuing sandbox activation in Stripe, wait for status OPEN, then retry.`
+      : "Stripe has neither a standalone Issuing balance nor an open Financial Account. Finish Card issuing sandbox activation, then retry.");
+  }
+  return {
+    type: "financial_account_v2",
+    availableCents: Number(financialAccount.balance?.available?.usd?.value || 0),
+    cardParameters: { financial_account_v2: financialAccount.id },
+  };
+}
+
+// Stripe chooses the provider-side funding model for each Issuing sandbox.
+// Neither provider balance becomes Corgi's customer ledger.
 export async function issueStripeCard({ name, email, phoneNumber, actorId, acceptedTermsAt, acceptedTermsIp, acceptedTermsUserAgent }) {
   if (providerMode("stripe") === "simulated") {
     return {
@@ -62,8 +93,7 @@ export async function issueStripeCard({ name, email, phoneNumber, actorId, accep
   const firstName = nameParts.shift();
   const lastName = nameParts.join(" ");
   if (!firstName || !lastName) throw new Error("Stripe cardholders need a first and last name.");
-
-  await getStripeIssuingBalance();
+  const funding = await getStripeFundingSource();
 
   const cardholder = await stripeRequest("/issuing/cardholders", {
     type: "individual",
@@ -91,6 +121,7 @@ export async function issueStripeCard({ name, email, phoneNumber, actorId, accep
     type: "virtual",
     status: "active",
     "metadata[actor_id]": actorId,
+    ...funding.cardParameters,
   });
   if (card.livemode) throw new Error("Stripe returned a live-mode card; only sandbox Issuing is allowed.");
   return { cardholderId: cardholder.id, cardId: card.id, last4: card.last4, source: "SANDBOX" };
@@ -100,9 +131,9 @@ export async function createStripeTestAuthorization(cardId, amountCents) {
   if (providerMode("stripe") === "simulated") {
     return { id: simulatedId("iauth"), amount: amountCents, source: "SIMULATED" };
   }
-  const availableCents = await getStripeIssuingBalance();
-  if (availableCents < amountCents) {
-    throw new Error(`Stripe's standalone Issuing balance has ${availableCents} cents available; add test USD funds before authorizing ${amountCents} cents.`);
+  const funding = await getStripeFundingSource();
+  if (funding.availableCents < amountCents) {
+    throw new Error(`Stripe's ${funding.type === "issuing_balance" ? "Issuing balance" : "Financial Account"} has ${funding.availableCents} cents available; add sandbox USD funds before authorizing ${amountCents} cents.`);
   }
   const authorization = await stripeRequest("/test_helpers/issuing/authorizations", {
     card: cardId,

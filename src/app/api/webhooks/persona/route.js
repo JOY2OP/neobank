@@ -1,5 +1,5 @@
 import { DEMO_IDS } from "@/lib/demo-users";
-import { recordProcessingAttempt, storeProviderEvent } from "@/lib/provider-events";
+import { recordProcessingAttempt, shouldProcessProviderEvent, storeProviderEvent } from "@/lib/provider-events";
 import { requiredEnv } from "@/lib/providers/config";
 import { insertRows, selectRows } from "@/lib/supabase";
 import { verifyPersonaSignature } from "@/lib/webhook-signatures";
@@ -27,7 +27,10 @@ export async function POST(request) {
     createdAt: event.data.attributes["created-at"],
     payload: event,
   });
-  if (!stored.inserted) return Response.json({ received: true, replay: true });
+  const replay = !stored.inserted;
+  if (replay && !(await shouldProcessProviderEvent(stored.provider_event_id))) {
+    return Response.json({ received: true, replay: true });
+  }
 
   try {
     const cases = await selectRows("kyb_cases", `provider_code=eq.persona&external_case_id=eq.${inquiry.id}`);
@@ -42,7 +45,7 @@ export async function POST(request) {
         provider_status: inquiry.attributes.status,
         occurred_at: event.data.attributes["created-at"],
         details: {},
-      }]);
+      }], { ignoreDuplicates: true });
     }
     if (status === "APPROVED") {
       await insertRows("business_account_events", [{
@@ -55,7 +58,7 @@ export async function POST(request) {
       }], { ignoreDuplicates: true });
     }
     await recordProcessingAttempt(stored.provider_event_id, "SUCCEEDED");
-    return Response.json({ received: true });
+    return Response.json({ received: true, replay, retried: replay });
   } catch (error) {
     await recordProcessingAttempt(stored.provider_event_id, "RETRYABLE_FAILURE", error);
     return Response.json({ error: error.message }, { status: 500 });

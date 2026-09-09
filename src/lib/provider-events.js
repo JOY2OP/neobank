@@ -36,3 +36,12 @@ export async function recordProcessingAttempt(providerEventId, outcome, error = 
     p_details: {},
   });
 }
+
+export async function shouldProcessProviderEvent(providerEventId) {
+  const rows = await selectRows(
+    "current_provider_event_status",
+    `provider_event_id=eq.${providerEventId}`,
+  );
+  const status = rows[0]?.status || "RECEIVED";
+  return status === "RECEIVED" || status === "RETRYABLE_FAILURE";
+}

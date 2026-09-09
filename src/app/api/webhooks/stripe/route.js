@@ -1,4 +1,4 @@
-import { recordProcessingAttempt, storeProviderEvent } from "@/lib/provider-events";
+import { recordProcessingAttempt, shouldProcessProviderEvent, storeProviderEvent } from "@/lib/provider-events";
 import { requiredEnv } from "@/lib/providers/config";
 import { callRpc, selectRows } from "@/lib/supabase";
 import { verifyStripeSignature } from "@/lib/webhook-signatures";
@@ -87,12 +87,15 @@ export async function POST(request) {
     createdAt: event.created ? new Date(event.created * 1000).toISOString() : null,
     payload: event,
   });
-  if (!stored.inserted) return Response.json({ received: true, replay: true });
+  const replay = !stored.inserted;
+  if (replay && !(await shouldProcessProviderEvent(stored.provider_event_id))) {
+    return Response.json({ received: true, replay: true });
+  }
 
   try {
     await processStripeEvent(event, stored.provider_event_id);
     await recordProcessingAttempt(stored.provider_event_id, "SUCCEEDED");
-    return Response.json({ received: true });
+    return Response.json({ received: true, replay, retried: replay });
   } catch (error) {
     await recordProcessingAttempt(stored.provider_event_id, "RETRYABLE_FAILURE", error);
     return Response.json({ error: error.message }, { status: 500 });

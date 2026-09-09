@@ -1,4 +1,4 @@
-import { recordProcessingAttempt, storeProviderEvent } from "@/lib/provider-events";
+import { recordProcessingAttempt, shouldProcessProviderEvent, storeProviderEvent } from "@/lib/provider-events";
 import { verifyPlaidSignature } from "@/lib/webhook-signatures";
 
 export async function POST(request) {
@@ -16,6 +16,10 @@ export async function POST(request) {
     createdAt: null,
     payload: event,
   });
-  if (stored.inserted) await recordProcessingAttempt(stored.provider_event_id, "SUCCEEDED");
-  return Response.json({ received: true, replay: !stored.inserted });
+  const replay = !stored.inserted;
+  const retried = replay && await shouldProcessProviderEvent(stored.provider_event_id);
+  if (!replay || retried) {
+    await recordProcessingAttempt(stored.provider_event_id, "SUCCEEDED");
+  }
+  return Response.json({ received: true, replay, retried });
 }

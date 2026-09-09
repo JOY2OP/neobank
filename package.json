@@ -9,12 +9,16 @@
     "lint": "eslint",
     "test": "node --test --experimental-test-isolation=none --experimental-default-type=module tests/*.test.mjs",
     "seed": "node --env-file=.env scripts/seed.mjs",
-    "smoke": "node --env-file=.env --experimental-default-type=module scripts/smoke.mjs"
+    "smoke": "node --env-file=.env --experimental-default-type=module scripts/smoke.mjs",
+    "mcp": "node --env-file=.env mcp/server.mjs",
+    "mcp:smoke": "node scripts/mcp-smoke.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
     "next": "16.3.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -11,6 +11,7 @@ No deployment is included.
 3. Apply `supabase-additive-migration.sql` after the main schema.
 4. Run `npm run seed`. It is append-only and safe to repeat.
 5. Run `npm run dev`, then open `http://localhost:3000/login`.
+6. Run `npm run mcp:smoke` to verify the agent surface advertises its six tools.
 
 After signing in, open `/core-loop`. It is the canonical seven-step journey and
 only marks a provider step complete when its real sandbox record exists; seeded
@@ -36,23 +37,39 @@ All four providers default to `sandbox`. Missing sandbox credentials produce a c
 - Demo security: `DEMO_SESSION_SECRET`, `CRON_SECRET`, `NEXT_PUBLIC_APP_URL`
 - Persona: mode, API key, template ID, webhook secret
 - Plaid: mode, client ID, sandbox secret, environment
-- Standalone Stripe Issuing: mode, test secret key, webhook secret
+- Stripe Issuing: mode, test secret key, webhook secret, and optional v2 Financial Account ID
 - Increase: mode, sandbox API key/base URL/account ID/webhook secret
 
 Only use sandbox identities and money. Do not enter real PII, PANs, or CVCs. The Plaid access token is written through a server-only SQL function into the private schema. Customer-visible rows retain masked details and opaque provider IDs.
 
 ### Stripe Issuing local setup
 
-The application uses standalone Stripe Issuing and its Issuing balance. It does not use Treasury, Cards attached to Financial Accounts, or any `financial_account` card parameter.
+The application uses Stripe Issuing. Stripe currently provisions some sandboxes with a standalone Issuing balance and others with a v2 Financial Account; the adapter detects the model and keeps either provider balance separate from Corgi's ledger.
 
-1. Create or select a Stripe sandbox with standalone Issuing enabled. `GET /v1/balance` for its test key must contain an `issuing` object. A sandbox whose Issuing page only shows **Financial account balance** is using the wrong funding model for this project.
-2. Add test USD funds to the standalone Issuing balance.
+1. Create or select a Stripe sandbox and finish Card issuing activation. If its v2 Financial Account is still `pending`, Stripe will reject card creation until it becomes `open`.
+2. Add test USD funds to the Card issuing funding source. Card authorization requires at least $73.40 so the demo can over-capture a $50.00 hold.
 3. Set `STRIPE_MODE=sandbox` and put that sandbox's `sk_test_...` key in `STRIPE_SECRET_KEY`.
+   Optionally set `STRIPE_FINANCIAL_ACCOUNT_ID`; otherwise Corgi discovers the first open v2 Financial Account when no standalone Issuing balance exists.
 4. Forward Stripe sandbox events to `http://localhost:3000/api/webhooks/stripe` and put the resulting `whsec_...` value in `STRIPE_WEBHOOK_SECRET`.
 5. Restart the app, sign in as Sarah, and issue a virtual card from `/app/cards`.
 6. Sign in as Maya and use the direct `/core-loop` runbook to authorize $50.00, capture $73.40, and refund the capture.
 
-The customer balance remains derived from Supabase journal entries. Stripe's standalone Issuing balance is provider-side test liquidity only.
+The customer balance remains derived from Supabase journal entries. Stripe's Issuing or Financial Account balance is provider-side test liquidity only.
+
+## MCP agent surface
+
+`npm run mcp` starts the local stdio MCP server configured in `.codex/config.toml`. It exposes five read tools and one constrained write tool:
+
+- `get_account_position`
+- `list_beneficiaries`
+- `list_payment_approval_queue`
+- `list_provider_event_status`
+- `list_reconciliation_breaks`
+- `create_outbound_payment_request`
+
+The write runs as an `AGENT` actor. The database therefore forces every amount into `PENDING_APPROVAL`, even below the normal threshold. It creates a request only: it cannot reserve funds, submit to Increase, or move money until a different human approves it.
+
+See `MCP.md` for the autonomy boundary and a sample call.
 
 Configure provider dashboards to call:
 
@@ -74,8 +91,9 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 1. Stripe sends an Issuing event to `src/app/api/webhooks/stripe/route.js`.
 2. The route verifies the signature against the untouched request body.
 3. `src/lib/provider-events.js` persists the verified delivery before processing, so failures remain visible and the external event ID deduplicates replays.
-4. An authorization calls `record_authorization_event`, creating a computed hold. A capture calls `record_card_settlement`, which posts the journal and releases the hold once.
-5. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
+4. A retryable failure returns an error to the provider. Re-delivery processes the stored payload again and appends another attempt; successful events become no-op replays.
+5. An authorization calls `record_authorization_event`, creating a computed hold. A capture calls `record_card_settlement`, which posts the journal and releases the hold once.
+6. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
 
 ### Outbound ACH and maker-checker
 
