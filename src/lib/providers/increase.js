@@ -97,6 +97,12 @@ export function simulateIncreaseTransfer(transferId, action, reason = "insuffici
   const suffix = action === "return" ? "return" : action;
   return increaseRequest(`/simulations/ach_transfers/${transferId}/${suffix}`, {
     method: "POST",
-    body: JSON.stringify(action === "return" ? { reason } : {}),
+    body: JSON.stringify(
+      action === "return"
+        ? { reason }
+        : action === "settle"
+          ? { inbound_funds_hold_behavior: "release_immediately" }
+          : {},
+    ),
   });
 }

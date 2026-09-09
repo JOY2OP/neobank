@@ -1,14 +1,19 @@
 import { randomUUID } from "node:crypto";
-import { fundAccountAction } from "@/app/actions";
+import { fundAccountAction, settleIncreaseFundingAction } from "@/app/actions";
 import { ActionForm } from "@/components/action-form";
 import PlaidLinkButton from "@/components/plaid-link-button";
 import { EmptyState, SectionHeading, SetupNotice, StatusPill } from "@/components/ui";
 import { getCustomerDashboard } from "@/lib/data";
+import { formatUsd } from "@/lib/money";
 import { requireOwner } from "@/lib/session";
 
 export default async function BanksPage() {
   const user = await requireOwner();
   const data = await getCustomerDashboard(user);
+  const fundableBanks = data.banks?.filter((bank) => (
+    bank.provider_code === "plaid"
+    && bank.connection.increase_external_account_id
+  )) || [];
 
   return (
     <>
@@ -39,17 +44,17 @@ export default async function BanksPage() {
             )}
           </section>
 
-          {data.banks.length ? (
+          {fundableBanks.length ? (
             <ActionForm action={fundAccountAction} submitLabel="Pull funds">
               <h2>Fund operating account</h2>
               <p className="form-help">
-                Increase pulls sandbox funds by ACH. They become available only after its settlement webhook.
+                Increase creates a sandbox ACH pull. Submit it here, then settle it in the list below.
               </p>
               <input type="hidden" name="idempotencyKey" value={randomUUID()} />
               <label>
                 From bank
                 <select name="bankId" required>
-                  {data.banks.map((bank) => (
+                  {fundableBanks.map((bank) => (
                     <option value={bank.id} key={bank.id}>
                       {bank.institution_name} •••• {bank.account_mask}
                     </option>
@@ -61,8 +66,37 @@ export default async function BanksPage() {
                 <input name="amount" inputMode="decimal" placeholder="5000.00" required />
               </label>
             </ActionForm>
-          ) : null}
+          ) : (
+            <section className="panel">
+              <EmptyState title="Link a Plaid sandbox bank first">
+                Seeded simulated banks cannot create real Increase sandbox transfers.
+              </EmptyState>
+            </section>
+          )}
         </div>
+      ) : null}
+      {!data.error && data.fundingPulls?.length ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div><span className="eyebrow">Increase Sandbox</span><h2>Funding pulls</h2></div>
+          </div>
+          <div className="stack-list">
+            {data.fundingPulls.map((payment) => (
+              <article className="list-row" key={payment.id}>
+                <div>
+                  <strong>{formatUsd(payment.amount_cents)} ACH pull</strong>
+                  <span>{payment.provider_payment_id}</span>
+                </div>
+                <StatusPill tone={payment.status === "SETTLED" ? "success" : "warning"}>{payment.status}</StatusPill>
+                {payment.status !== "SETTLED" ? (
+                  <ActionForm action={settleIncreaseFundingAction} submitLabel="Settle sandbox pull" className="core-action">
+                    <input type="hidden" name="paymentId" value={payment.id} />
+                  </ActionForm>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </section>
       ) : null}
     </>
   );

@@ -5,11 +5,12 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DEMO_IDS, getDemoUser } from "@/lib/demo-users";
+import { recordIncreaseAchTransfer } from "@/lib/increase-events";
 import { dollarsToCents } from "@/lib/money";
 import { newIdempotencyKey, submitPaymentRequest } from "@/lib/payments";
 import { startPersonaInquiry } from "@/lib/providers/persona";
 import { captureStripeAuthorization, createStripeTestAuthorization, issueStripeCard, refundStripeTransaction, retrieveStripeAuthorization, retrieveStripeTransaction } from "@/lib/providers/stripe";
-import { createIncreaseFundingTransfer } from "@/lib/providers/increase";
+import { createIncreaseFundingTransfer, retrieveIncreaseObject, simulateIncreaseTransfer } from "@/lib/providers/increase";
 import { providerMode } from "@/lib/providers/config";
 import { simulatedId, simulatedProviderEvent } from "@/lib/providers/simulator";
 import { clearDemoSession, requireCustomer, requireOps, requireOwner, setDemoSession } from "@/lib/session";
@@ -255,7 +256,49 @@ export async function fundAccountAction(_previous, formData) {
     revalidatePath("/app");
     revalidatePath("/app/banks");
     revalidatePath("/core-loop");
-    return { message: "Funding pull submitted. Available balance updates after settlement." };
+    return { message: "Funding pull submitted. Settle it below to make the sandbox funds available." };
+  } catch (error) {
+    return resultError(error);
+  }
+}
+
+export async function settleIncreaseFundingAction(_previous, formData) {
+  try {
+    const owner = await requireOwner();
+    if (providerMode("increase") !== "sandbox") {
+      throw new Error("Set INCREASE_MODE=sandbox to settle a real Increase sandbox pull.");
+    }
+    const paymentId = String(formData.get("paymentId") || "");
+    if (!paymentId) throw new Error("Choose a pending funding pull.");
+
+    const payments = await selectRows(
+      "payments",
+      `id=eq.${paymentId}&business_account_id=eq.${DEMO_IDS.account}&direction=eq.INBOUND&provider_code=eq.increase`,
+    );
+    const payment = payments[0];
+    if (!payment?.provider_payment_id) throw new Error("Increase funding pull not found.");
+
+    const statuses = await selectRows("current_payment_status", `payment_id=eq.${payment.id}`);
+    if (statuses[0]?.status === "SETTLED") return { message: "This funding pull is already settled." };
+
+    let transfer = await retrieveIncreaseObject("ach_transfer", payment.provider_payment_id);
+    if (!transfer.settlement?.settled_at) {
+      transfer = await simulateIncreaseTransfer(transfer.id, "settle");
+    }
+    if (!transfer.settlement?.settled_at) {
+      throw new Error("Increase accepted the simulation but did not mark the pull settled yet.");
+    }
+
+    await recordIncreaseAchTransfer({
+      transfer,
+      eventId: `sandbox-settle:${transfer.id}`,
+      eventCreatedAt: transfer.settlement.settled_at,
+      actorId: owner.actorId,
+    });
+    revalidatePath("/app");
+    revalidatePath("/app/banks");
+    revalidatePath("/core-loop");
+    return { message: "Increase settled the sandbox pull and Corgi updated the available balance." };
   } catch (error) {
     return resultError(error);
   }

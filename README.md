@@ -89,8 +89,9 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 
 1. Plaid Link exchanges its short-lived public token on the server and retrieves Auth details.
 2. Increase tokenizes those routing/account details as an external account.
-3. The owner funding form creates a negative Increase ACH transfer (a pull from the linked bank), while Corgi records a positive inbound amount.
-4. Funds remain pending until Increase reports settlement. A later funding recall reverses the immutable entry, restricts the account, and freezes its cards.
+3. The owner funding form creates a negative Increase ACH transfer (a pull from the linked bank), while Corgi records a positive inbound amount. Seeded simulated banks are excluded from this real sandbox form.
+4. The Linked banks page exposes pending sandbox pulls so the owner can settle them through Increase's simulation API. Increase keeps the transfer status as `submitted`, so Corgi detects settlement from `settlement.settled_at` and posts the signed provider result exactly once.
+5. A later funding recall reverses the immutable entry, restricts the account, and freezes its cards.
 
 ### Standing orders
 

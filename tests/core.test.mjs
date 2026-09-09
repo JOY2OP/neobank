@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { increasePaymentEventKey, increasePaymentEventType, increasePaymentValueDate } from "../src/lib/increase-transfer-state.js";
 import { dollarsToCents, formatUsd } from "../src/lib/money.js";
 import { verifyIncreaseSignature, verifyPersonaSignature, verifyStripeSignature } from "../src/lib/hmac-signatures.js";
 import { createSignedSessionValue, readSignedSessionSlug } from "../src/lib/session-signature.js";
@@ -41,4 +42,29 @@ test("provider HMAC checks accept current signatures and reject stale ones", () 
   });
   assert.equal(verifyIncreaseSignature(body, headers, secret), true);
   assert.equal(verifyStripeSignature(body, `t=${now - 301},v1=${stripe}`, secret), false);
+});
+
+test("Increase settlement is detected from the settlement timestamp", () => {
+  const transfer = {
+    id: "ach_transfer_test",
+    status: "submitted",
+    settlement: { settled_at: "2026-09-09T12:00:00Z" },
+    submission: { effective_date: "2026-09-08" },
+  };
+  assert.equal(increasePaymentEventType(transfer), "SETTLED");
+  assert.equal(
+    increasePaymentEventKey(transfer, "SETTLED", "event_test"),
+    "increase:ach_transfer_test:settled:2026-09-09T12:00:00Z",
+  );
+  assert.equal(increasePaymentValueDate(transfer, "SETTLED", "2026-09-10T00:00:00Z"), "2026-09-09");
+});
+
+test("Increase returns take precedence over settlement", () => {
+  const transfer = {
+    id: "ach_transfer_returned",
+    status: "submitted",
+    settlement: { settled_at: "2026-09-09T12:00:00Z" },
+    return: { reason: "insufficient_fund" },
+  };
+  assert.equal(increasePaymentEventType(transfer), "RETURNED");
 });

@@ -22,16 +22,20 @@ export async function getCustomerDashboard(user) {
       ? `business_account_id=eq.${DEMO_IDS.account}`
       : `business_account_id=eq.${DEMO_IDS.account}&created_by_actor_id=eq.${user.actorId}`;
 
-    const [cards, requests, beneficiaries, orders] = await Promise.all([
+    const [cards, requests, beneficiaries, orders, fundingPayments] = await Promise.all([
       selectRows("cards", `select=*&${cardFilter}&order=created_at.desc`),
       selectRows("payment_request_status", `select=*&${requestFilter}&order=created_at.desc`),
       selectRows("beneficiaries", `select=*&organization_id=eq.${DEMO_IDS.organization}`),
       selectRows("current_standing_orders", `select=*&${orderFilter}&order=created_at.desc`),
+      user.role === "OWNER"
+        ? selectRows("payments", `select=*&business_account_id=eq.${DEMO_IDS.account}&direction=eq.INBOUND&provider_code=eq.increase&order=created_at.desc&limit=10`)
+        : Promise.resolve([]),
     ]);
 
     const cardIds = cards.map((card) => card.id);
     const orderIds = orders.map((order) => order.id);
-    const [balances, accountStatus, cardStatuses, settlements, banks, bankEvents, holds, activity, kyb] = await Promise.all([
+    const fundingPaymentIds = fundingPayments.map((payment) => payment.id);
+    const [balances, accountStatus, cardStatuses, settlements, banks, bankEvents, holds, activity, kyb, fundingStatuses] = await Promise.all([
       user.role === "OWNER" ? selectRows("business_account_balances", `business_account_id=eq.${DEMO_IDS.account}`) : Promise.resolve([]),
       selectRows("current_business_account_status", `business_account_id=eq.${DEMO_IDS.account}`),
       cardIds.length ? selectRows("current_card_status", `card_id=in.(${cardIds.join(",")})`) : Promise.resolve([]),
@@ -41,6 +45,9 @@ export async function getCustomerDashboard(user) {
       user.role === "OWNER" ? selectRows("active_card_holds", `business_account_id=eq.${DEMO_IDS.account}`) : Promise.resolve([]),
       user.role === "OWNER" ? selectRows("business_account_activity", `business_account_id=eq.${DEMO_IDS.account}&order=booked_at.desc&limit=50`) : Promise.resolve([]),
       user.role === "OWNER" ? selectRows("current_kyb_status", `organization_id=eq.${DEMO_IDS.organization}`) : Promise.resolve([]),
+      fundingPaymentIds.length
+        ? selectRows("current_payment_status", `select=*&payment_id=in.(${fundingPaymentIds.join(",")})`)
+        : Promise.resolve([]),
     ]);
 
     const occurrences = orderIds.length
@@ -56,6 +63,7 @@ export async function getCustomerDashboard(user) {
       standing_order_id: occurrenceOrders.get(attempt.occurrence_id),
     }));
     const statuses = new Map(cardStatuses.map((row) => [row.card_id, row.status]));
+    const fundingStatusByPayment = new Map(fundingStatuses.map((row) => [row.payment_id, row]));
     const employeeActivity = [
       ...settlements.map((settlement) => ({
         id: settlement.id,
@@ -75,6 +83,11 @@ export async function getCustomerDashboard(user) {
       banks: banks.map((bank) => ({
         ...bank,
         connection: bankEvents.find((event) => event.external_bank_account_id === bank.id)?.details || {},
+      })),
+      fundingPulls: fundingPayments.map((payment) => ({
+        ...payment,
+        status: fundingStatusByPayment.get(payment.id)?.status || "UNKNOWN",
+        value_date: fundingStatusByPayment.get(payment.id)?.value_date || null,
       })),
       requests,
       beneficiaries,
