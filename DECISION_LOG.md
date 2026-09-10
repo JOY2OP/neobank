@@ -167,3 +167,5 @@ Table:
 
 ## [T+46h] LITHIC SANDBOX TERMINAL NOT WORKING IN OPS
 - Enabling charging via card, authorization, settlement and reversal
+
+## [T+47h] CREATING WALKTHROUGH VIDEO AND FILLING THE SUBMISSION
