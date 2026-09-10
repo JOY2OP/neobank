@@ -49,8 +49,6 @@ try {
   for (const file of [
     "tests/sql/local-postgres-bootstrap.sql",
     "supabase-schema.sql",
-    "supabase-additive-migration.sql",
-    "supabase-domain-hardening-migration.sql",
     "tests/sql/domain-gauntlet-fixture.sql",
     "supabase-domain-gauntlet.sql",
   ]) {

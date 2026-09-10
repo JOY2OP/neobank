@@ -8,10 +8,9 @@ No deployment is included.
 
 1. Copy `.env.example` to `.env` and replace every placeholder needed by the providers you use.
 2. Apply `supabase-schema.sql` to a new Supabase project.
-3. Apply `supabase-additive-migration.sql` after the main schema.
-4. Run `npm run seed`. It is append-only and safe to repeat.
-5. Run `npm run dev`, then open `http://localhost:3000/login`.
-6. Run `npm run mcp:smoke` to verify the agent surface advertises its six tools.
+3. Run `npm run seed`. It is append-only and safe to repeat.
+4. Run `npm run dev`, then open `http://localhost:3000/login`.
+5. Run `npm run mcp:smoke` to verify the agent surface advertises its six tools.
 
 After signing in, open `/core-loop`. It is the canonical seven-step journey and
 only marks a provider step complete when its real sandbox record exists; seeded
@@ -49,9 +48,8 @@ The application uses Lithic for virtual-card issuance and sandbox card-network e
 1. Create a Lithic sandbox and copy its API key.
 2. Set `LITHIC_MODE=sandbox` and put the key in `LITHIC_API_KEY`.
 3. Register `http://localhost:3000/api/webhooks/lithic` through your HTTPS tunnel as a Lithic event subscription for `card_transaction.updated`, then put its `whsec_...` secret in `LITHIC_WEBHOOK_SECRET`.
-4. Apply `supabase-additive-migration.sql` so the existing project contains the `lithic` provider reference.
-5. Restart the app, sign in as Sarah, and issue a virtual card from `/app/cards`.
-6. Sign in as Maya and use the direct `/core-loop` runbook to authorize $50.00, clear $73.40, and return the transaction.
+4. Restart the app, sign in as Sarah, and issue a virtual card from `/app/cards`.
+5. Sign in as Maya and use the direct `/core-loop` runbook to authorize $50.00, clear $73.40, and return the transaction.
 
 The server retrieves full sandbox card data from Lithic only while calling its simulator; Corgi persists only the opaque card token and last four digits. The customer balance remains derived from Supabase journal entries.
 
@@ -123,7 +121,7 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 
 ## Reconciliation and bitemporal statements
 
-Ops can upload the sample at `public/sample-scheme-file.csv`. The additive migration processes a file atomically and projects `IN_FILE_NOT_LEDGER`, `IN_LEDGER_NOT_FILE`, and `AMOUNT_MISMATCH` with first-seen aging. Duplicate file hashes return the original run. A parked settlement is not ledger truth until it has a posting journal link, and a clean rerun for the same provider/date removes the previous break from the current projection.
+Ops can upload the sample at `public/sample-scheme-file.csv`. The schema processes a file atomically and projects `IN_FILE_NOT_LEDGER`, `IN_LEDGER_NOT_FILE`, and `AMOUNT_MISMATCH` with first-seen aging. Duplicate file hashes return the original run. A parked settlement is not ledger truth until it has a posting journal link, and a clean rerun for the same provider/date removes the previous break from the current projection.
 
 Statements use `value_date` for the corrected financial day and `booked_at` for the `knowledge_cutoff`. Moving the cutoff backward shows what the system knew before a later reversal arrived. Card reversals are database-enforced to use the original settlement value date.
 
@@ -138,6 +136,6 @@ npm run build
 
 With the local server running, `npm run smoke` verifies that all 13 authenticated customer and Ops pages finish rendering seeded data.
 
-`npm run test:domain` starts a disposable local PostgreSQL 15 container, applies the complete schema and migrations, runs the rollback-only SQL gauntlet, and removes the container. It proves derived available balance, `$73.40` over-capture, incremental and multiple partial captures, duplicate delivery, bitemporal reversal, settlement-before-auth, force post, append-only enforcement, and reconciliation of parked settlements.
+`npm run test:domain` starts a disposable local PostgreSQL 15 container, applies the complete schema, runs the rollback-only SQL gauntlet, and removes the container. It proves derived available balance, `$73.40` over-capture, incremental and multiple partial captures, duplicate delivery, bitemporal reversal, settlement-before-auth, force post, append-only enforcement, and reconciliation of parked settlements.
 
-For an existing hosted database, apply `supabase-domain-hardening-migration.sql` once through the Supabase SQL Editor before running the application changes. The hosted database is not modified by the local gauntlet.
+The hosted database has already received the domain-hardening changes. Fresh environments need only `supabase-schema.sql`. The hosted database is not modified by the local gauntlet.

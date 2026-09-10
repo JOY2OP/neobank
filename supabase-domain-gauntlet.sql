@@ -1,4 +1,4 @@
--- Transactional database gauntlet. Run after supabase-domain-hardening-migration.sql.
+-- Transactional database gauntlet. Run after supabase-schema.sql.
 -- It requires seeded simulator accounts, proves the hostile accounting cases, and
 -- rolls every test row back at the end.
 
