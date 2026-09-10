@@ -17,6 +17,7 @@ const ids = {
   customerLedger: "10000000-0000-4000-8000-000000000020",
   achClearing: "10000000-0000-4000-8000-000000000021",
   cardPayable: "10000000-0000-4000-8000-000000000022",
+  lithicCardPayable: "10000000-0000-4000-8000-000000000023",
   sarahCard: "10000000-0000-4000-8000-000000000030",
   johnCard: "10000000-0000-4000-8000-000000000031",
   beneficiary: "10000000-0000-4000-8000-000000000040",
@@ -121,6 +122,13 @@ ids.cardPayable = await rpc("create_ledger_account", {
   p_purpose: "CARD_NETWORK_PAYABLE",
   p_name: "Simulator card payable",
   p_provider_code: "simulator",
+});
+ids.lithicCardPayable = await rpc("create_ledger_account", {
+  p_external_key: "PLATFORM:LITHIC_CARD_NETWORK_PAYABLE",
+  p_account_class: "LIABILITY",
+  p_purpose: "CARD_NETWORK_PAYABLE",
+  p_name: "Lithic card payable",
+  p_provider_code: "lithic",
 });
 await rpc("post_journal_entry", {
   p_posting_key: "seed:initial-funding",

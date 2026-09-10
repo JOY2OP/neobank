@@ -87,14 +87,15 @@ The code deliberately keeps orchestration visible and uses the SQL functions as 
 
 ### Card authorization and settlement
 
-1. Lithic sends `card_transaction.updated` to `src/app/api/webhooks/lithic/route.js`.
-2. The route verifies the signature against the untouched request body.
-3. `src/lib/provider-events.js` persists the verified delivery before processing, so failures remain visible and the external event ID deduplicates replays.
-4. A retryable failure returns an error to the provider. Re-delivery processes the stored payload again and appends another attempt; successful events become no-op replays.
-5. Every transaction snapshot is replayed as deterministic event commands. Authorization advice becomes an incremental total; each clearing is its own capture; only the clearing that exhausts Lithic's remaining hold is final.
-6. An authorization calls `record_authorization_event`, creating a computed hold. A clearing calls `record_card_settlement`, which posts the journal and releases only the captured amount until final capture.
-7. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
-8. Returns must carry an exact original transaction or clearing reference. An ambiguous return is retained as retryable instead of reversing the latest settlement on a card.
+1. Ops chooses a specific employee card in the Lithic Sandbox Terminal and triggers a merchant authorization through Lithic's simulation API.
+2. Lithic sends `card_transaction.updated` to `src/app/api/webhooks/lithic/route.js`.
+3. The route verifies the signature against the untouched request body.
+4. `src/lib/provider-events.js` persists the verified delivery before processing, so failures remain visible and the external event ID deduplicates replays.
+5. A retryable failure returns an error to the provider. Re-delivery processes the stored payload again and appends another attempt; successful events become no-op replays.
+6. Every transaction snapshot is replayed as deterministic event commands. Authorization advice becomes an incremental total; each clearing is its own capture; only the clearing that exhausts Lithic's remaining hold is final.
+7. An authorization calls `record_authorization_event`, creating a computed hold. A clearing calls `record_card_settlement`, which posts the journal and releases only the captured amount until final capture.
+8. A settlement that precedes authorization is parked by the SQL function. A later authorization matches it without leaving a stale hold. A force post is explicitly marked and posts without a hold.
+9. Returns must carry an exact original transaction or clearing reference. An ambiguous return is retained as retryable instead of reversing the latest settlement on a card.
 
 ### Outbound ACH and maker-checker
 

@@ -22,7 +22,7 @@ export async function getCustomerDashboard(user) {
       ? `business_account_id=eq.${DEMO_IDS.account}`
       : `business_account_id=eq.${DEMO_IDS.account}&created_by_actor_id=eq.${user.actorId}`;
 
-    const [cards, requests, beneficiaries, orders, fundingPayments] = await Promise.all([
+    const [cards, requests, beneficiaries, orders, fundingPayments, actors] = await Promise.all([
       selectRows("cards", `select=*&${cardFilter}&order=created_at.desc`),
       selectRows("payment_request_status", `select=*&${requestFilter}&order=created_at.desc`),
       selectRows("beneficiaries", `select=*&organization_id=eq.${DEMO_IDS.organization}`),
@@ -30,6 +30,7 @@ export async function getCustomerDashboard(user) {
       user.role === "OWNER"
         ? selectRows("payments", `select=*&business_account_id=eq.${DEMO_IDS.account}&direction=eq.INBOUND&provider_code=eq.increase&order=created_at.desc&limit=10`)
         : Promise.resolve([]),
+      selectRows("actors", "select=id,display_name"),
     ]);
 
     const cardIds = cards.map((card) => card.id);
@@ -63,6 +64,7 @@ export async function getCustomerDashboard(user) {
       standing_order_id: occurrenceOrders.get(attempt.occurrence_id),
     }));
     const statuses = new Map(cardStatuses.map((row) => [row.card_id, row.status]));
+    const actorNames = new Map(actors.map((actor) => [actor.id, actor.display_name]));
     const fundingStatusByPayment = new Map(fundingStatuses.map((row) => [row.payment_id, row]));
     const employeeActivity = [
       ...settlements.map((settlement) => ({
@@ -79,7 +81,11 @@ export async function getCustomerDashboard(user) {
       configured: true,
       balance: first(balances) || {},
       accountStatus: first(accountStatus),
-      cards: cards.map((card) => ({ ...card, status: statuses.get(card.id) || "UNKNOWN" })),
+      cards: cards.map((card) => ({
+        ...card,
+        cardholder_name: actorNames.get(card.cardholder_actor_id) || "Unknown cardholder",
+        status: statuses.get(card.id) || "UNKNOWN",
+      })),
       banks: banks.map((bank) => ({
         ...bank,
         connection: bankEvents.find((event) => event.external_bank_account_id === bank.id)?.details || {},
@@ -153,6 +159,49 @@ export async function getOpsDashboard() {
       .map((event) => event.provider_code)
       .filter((provider, index, providers) => providers.indexOf(provider) === index),
   };
+}
+
+export async function getLithicSandboxTerminal() {
+  if (!isSupabaseConfigured()) return { cards: [], authorizations: [], settlements: [] };
+
+  try {
+    const [cards, actors, authorizations, holds, settlements, settlementEvents] = await Promise.all([
+      selectRows("cards", `select=*&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.lithic&order=created_at.desc`),
+      selectRows("actors", "select=id,display_name"),
+      selectRows("card_authorizations", "select=*&provider_code=eq.lithic&order=first_seen_at.desc"),
+      selectRows("active_card_holds", `select=*&business_account_id=eq.${DEMO_IDS.account}&order=last_recorded_at.desc`),
+      selectRows("card_settlements", "select=*&provider_code=eq.lithic&order=recorded_at.desc&limit=50"),
+      selectRows("card_settlement_events", "select=settlement_id,event_type&event_type=eq.REVERSED"),
+    ]);
+    const actorNames = new Map(actors.map((actor) => [actor.id, actor.display_name]));
+    const cardById = new Map(cards.map((card) => [card.id, {
+      ...card,
+      cardholder_name: actorNames.get(card.cardholder_actor_id) || "Unknown cardholder",
+    }]));
+    const authorizationByProviderId = new Map(authorizations.map((authorization) => [authorization.provider_authorization_id, authorization]));
+    const holdByAuthorizationId = new Map(holds.map((hold) => [hold.authorization_id, hold]));
+    const reversedSettlementIds = new Set(settlementEvents.map((event) => event.settlement_id));
+
+    return {
+      cards: [...cardById.values()],
+      authorizations: authorizations
+        .filter((authorization) => cardById.has(authorization.card_id) && holdByAuthorizationId.has(authorization.id))
+        .map((authorization) => ({
+          ...authorization,
+          ...holdByAuthorizationId.get(authorization.id),
+          card: cardById.get(authorization.card_id),
+        })),
+      settlements: settlements
+        .filter((settlement) => cardById.has(settlement.card_id) && !reversedSettlementIds.has(settlement.id))
+        .map((settlement) => ({
+          ...settlement,
+          card: cardById.get(settlement.card_id),
+          authorization: authorizationByProviderId.get(settlement.external_authorization_id) || null,
+        })),
+    };
+  } catch (error) {
+    return { cards: [], authorizations: [], settlements: [], error: error.message };
+  }
 }
 
 export async function getStatement({ start, end, knownAt }) {

@@ -110,7 +110,7 @@ Table:
 ## [T+30h] 18-HOUR FREEZE PLAN
 - The core loop is the end-to-end demo script, not a customer or operations navigation item. Keep any executable runbook off the primary sidebar.
 - Freeze the submission around the immutable ledger, holds, card authorization/clearing lifecycle, maker-checker ACH, bitemporal statements, and reconciliation.
-- Cut USDC, wires, native mobile, the general public API, full statement artifacts, and all stretch-ladder features. The detailed rationale and week-two plan live in `CUTLIST.md`.
+- Cut USDC despite its first-class place in the brief. Prioritize the ledger, hostile card sequencing, bitemporal corrections, approvals, and reconciliation—the areas Track 3 grades hardest. The detailed rationale and week-two plan live in `CUTLIST.md`.
 - Remove USDC/internal-transfer specialization from the fresh-install schema. A future rail should arrive through the generic payment/provider-event boundary rather than as speculative v0 tables.
 - Persona remains simulated because sandbox access is sales-gated. Never present it as live.
 - Customer-facing balances come only from Supabase ledger projections. Plaid, Increase, and the card processor contribute verified external events; provider balances are not Corgi's customer balance.
@@ -159,3 +159,7 @@ Table:
 - Never guess which purchase a return corrects. Require an exact related transaction/clearing reference and leave ambiguous deliveries retryable for operations.
 - Reconciliation compares scheme rows with posted journal links, not merely settlement records. A clean rerun for the same provider and settlement date replaces stale break projections.
 - Enforce the merchant-correction value date inside Postgres and run the hostile accounting suite in a disposable PostgreSQL container with every test mutation rolled back.
+
+## [T+36h] LITHIC SANDBOX TERMINAL
+- Put merchant-side test controls in Ops, not in the customer ACH payment form. Ops selects a specific employee card, authorization, or settlement for each Lithic sandbox step.
+- Keep employee ownership in Corgi and the Lithic card memo while this sandbox uses Lithic's default program account; do not introduce a second account-holder/KYC flow.

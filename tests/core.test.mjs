@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import Lithic from "lithic";
 import { increasePaymentEventKey, increasePaymentEventType, increasePaymentValueDate } from "../src/lib/increase-transfer-state.js";
 import { lithicTransactionCommands } from "../src/lib/lithic-events.js";
+import { buildLithicAuthorizationRequest, waitForLithicTransaction } from "../src/lib/lithic-simulation.js";
 import { dollarsToCents, formatUsd } from "../src/lib/money.js";
 import { verifyIncreaseSignature, verifyPersonaSignature } from "../src/lib/hmac-signatures.js";
 import { createSignedSessionValue, readSignedSessionSlug } from "../src/lib/session-signature.js";
@@ -18,6 +19,36 @@ test("invalid money input is rejected", () => {
   for (const value of ["0", "-1", "1.234", "ten", ""]) {
     assert.throws(() => dollarsToCents(value));
   }
+});
+
+test("Lithic authorization supplies merchant amount with merchant currency", () => {
+  const request = buildLithicAuthorizationRequest({
+    pan: "4111111111111111",
+    amountCents: 5000,
+    descriptor: "Corgi Fuel Stop",
+  });
+
+  assert.equal(request.amount, 5000);
+  assert.equal(request.merchant_amount, 5000);
+  assert.equal(request.merchant_currency, "USD");
+  assert.equal(request.descriptor, "CORGI FUEL STOP");
+});
+
+test("Lithic transaction reads retry temporary Sandbox 404s", async () => {
+  let attempts = 0;
+  const transaction = await waitForLithicTransaction({
+    token: "transaction_test",
+    eventType: "AUTHORIZATION",
+    delays: [0, 0, 0],
+    retrieve: async () => {
+      attempts += 1;
+      if (attempts < 3) throw Object.assign(new Error("Transaction not found"), { status: 404 });
+      return { token: "transaction_test", events: [{ type: "AUTHORIZATION" }] };
+    },
+  });
+
+  assert.equal(attempts, 3);
+  assert.equal(transaction.token, "transaction_test");
 });
 
 test("a signed demo cookie rejects identity tampering", () => {

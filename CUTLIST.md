@@ -31,7 +31,7 @@ The “core loop” is this demo script, not a customer product area. It may rem
 
 | Cut | Why it is cut | Week-two implementation |
 | --- | --- | --- |
-| USDC/cross-border payout | It is on the stretch ladder and no adapter exists. A USDC-specific table would pretend the integration is implemented. | Add Circle/Bridge behind the generic payment adapter, testnet confirmation, accepted quote, and ledger posting. |
+| USDC/cross-border payout | Explicitly cut despite being first-class in the brief so the ledger, hostile card lifecycle, corrections, approvals, and reconciliation are demo-ready. | Add Circle/Bridge behind the generic payment adapter with testnet confirmation and ledger posting. |
 | Wires and multi-currency | The brief permits wires only “if ambitious” and explicitly fixes the ledger to USD cents. | Add a wire adapter; treat any future FX quote as a separate accepted contract. |
 | Native mobile app | A responsive web experience is enough to demonstrate the domain mechanics in the remaining time. | Build a thin mobile client over the same authenticated API. |
 | General public API | A safe public contract, OAuth, rate limits, versioning, and idempotency deserve more than a rushed wrapper. Webhook routes are not presented as the public API. | Publish read endpoints and payment-intent creation with scoped credentials and idempotency keys. |

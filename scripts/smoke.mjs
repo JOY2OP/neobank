@@ -15,7 +15,7 @@ const checks = [
   { user: "ops", path: "/ops/reconciliation", marker: "Reconciliation" },
   { user: "ops", path: "/ops/statements", marker: "Statements" },
   { user: "ops", path: "/ops/events", marker: "Provider events" },
-  { user: "ops", path: "/ops/demo-lab", marker: "Demo lab" },
+  { user: "ops", path: "/ops/demo-lab", marker: "Lithic Sandbox Terminal" },
 ];
 
 let failures = 0;

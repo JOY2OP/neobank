@@ -575,6 +575,139 @@ function requireLithicSandbox() {
   }
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function requiredUuid(formData, name, label) {
+  const value = String(formData.get(name) || "");
+  if (!UUID_PATTERN.test(value)) throw new Error(`Choose a valid ${label}.`);
+  return value;
+}
+
+async function lithicCardForTerminal(cardId) {
+  const cards = await selectRows(
+    "cards",
+    `id=eq.${cardId}&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.lithic&limit=1`,
+  );
+  if (!cards[0]) throw new Error("Choose a Lithic card issued to an Acme team member.");
+  const statuses = await selectRows("current_card_status", `card_id=eq.${cardId}&limit=1`);
+  if (!["ACTIVATED", "UNFROZEN"].includes(statuses[0]?.status)) {
+    throw new Error("The selected card is not active in Corgi.");
+  }
+  return cards[0];
+}
+
+function revalidateLithicViews() {
+  revalidatePath("/ops");
+  revalidatePath("/ops/demo-lab");
+  revalidatePath("/ops/events");
+  revalidatePath("/app");
+  revalidatePath("/app/cards");
+  revalidatePath("/core-loop");
+}
+
+export async function lithicSandboxAuthorizeAction(_previous, formData) {
+  try {
+    const ops = await requireOps();
+    requireLithicSandbox();
+    const cardId = requiredUuid(formData, "cardId", "Lithic card");
+    const card = await lithicCardForTerminal(cardId);
+    const amountCents = dollarsToCents(formData.get("amount"));
+    const descriptor = String(formData.get("descriptor") || "").trim();
+    const authorization = await createLithicTestAuthorization(card.provider_card_id, amountCents, descriptor);
+    const eventType = authorization.approved ? "AUTHORIZED" : "DECLINED";
+    await callRpc("record_authorization_event", {
+      p_provider_code: "lithic",
+      p_provider_authorization_id: authorization.id,
+      p_card_id: card.id,
+      p_event_type: eventType,
+      p_authorized_total_cents: authorization.approved ? amountCents : null,
+      p_occurred_at: authorization.created || new Date().toISOString(),
+      p_idempotency_key: `lithic:authorization:${authorization.eventId}:${eventType}`,
+      p_merchant_name: authorization.merchantName,
+      p_merchant_category_code: authorization.merchantCategoryCode,
+      p_details: { source: "SANDBOX", triggered_by: "ops-terminal", actor_id: ops.actorId },
+    });
+    revalidateLithicViews();
+    if (!authorization.approved) {
+      throw new Error(`Lithic declined the authorization (${authorization.result || "unknown result"}).`);
+    }
+    return { message: `Lithic authorized card •••• ${card.last4}. The amount is now an active hold.` };
+  } catch (error) {
+    return resultError(error);
+  }
+}
+
+export async function lithicSandboxClearAction(_previous, formData) {
+  try {
+    const ops = await requireOps();
+    requireLithicSandbox();
+    const authorizationId = requiredUuid(formData, "authorizationId", "pending authorization");
+    const authorizations = await selectRows(
+      "card_authorizations",
+      `id=eq.${authorizationId}&provider_code=eq.lithic&limit=1`,
+    );
+    if (!authorizations[0]) throw new Error("Choose a pending Lithic authorization.");
+    const authorization = authorizations[0];
+    const card = await lithicCardForTerminal(authorization.card_id);
+    const holds = await selectRows(
+      "active_card_holds",
+      `authorization_id=eq.${authorization.id}&business_account_id=eq.${DEMO_IDS.account}&limit=1`,
+    );
+    if (!holds[0]) throw new Error("That authorization no longer has an active hold.");
+    const amountCents = dollarsToCents(formData.get("amount"));
+    const clearing = await clearLithicAuthorization(authorization.provider_authorization_id, amountCents);
+    await callRpc("record_card_settlement", {
+      p_provider_code: "lithic",
+      p_provider_settlement_id: clearing.id,
+      p_card_id: card.id,
+      p_external_authorization_id: authorization.provider_authorization_id,
+      p_amount_cents: amountCents,
+      p_value_date: clearing.created.slice(0, 10),
+      p_occurred_at: clearing.created || new Date().toISOString(),
+      p_explicit_force_post: false,
+      p_is_final_capture: true,
+      p_idempotency_key: `lithic:clearing:${clearing.id}`,
+      p_actor_id: ops.actorId,
+    });
+    revalidateLithicViews();
+    return { message: `Lithic cleared card •••• ${card.last4}. Corgi posted the settlement and released its hold.` };
+  } catch (error) {
+    return resultError(error);
+  }
+}
+
+export async function lithicSandboxReturnAction(_previous, formData) {
+  try {
+    const ops = await requireOps();
+    requireLithicSandbox();
+    const settlementId = requiredUuid(formData, "settlementId", "settled card purchase");
+    const settlements = await selectRows(
+      "card_settlements",
+      `id=eq.${settlementId}&business_account_id=eq.${DEMO_IDS.account}&provider_code=eq.lithic&limit=1`,
+    );
+    if (!settlements[0]) throw new Error("Choose a settled Lithic card purchase.");
+    const settlement = settlements[0];
+    const priorReversals = await selectRows(
+      "card_settlement_events",
+      `settlement_id=eq.${settlement.id}&event_type=eq.REVERSED&limit=1`,
+    );
+    if (priorReversals[0]) throw new Error("That settlement has already been returned.");
+    const card = await lithicCardForTerminal(settlement.card_id);
+    const returned = await returnLithicTransaction(card.provider_card_id, settlement.amount_cents);
+    await callRpc("reverse_card_settlement", {
+      p_settlement_id: settlement.id,
+      p_idempotency_key: `lithic:return:${returned.id}`,
+      p_value_date: settlement.value_date,
+      p_reason: "Lithic sandbox return",
+      p_actor_id: ops.actorId,
+    });
+    revalidateLithicViews();
+    return { message: `Lithic returned the purchase on card •••• ${card.last4}. Corgi appended the correction.` };
+  } catch (error) {
+    return resultError(error);
+  }
+}
+
 export async function coreAuthorizeCardAction() {
   try {
     const ops = await requireOps();
