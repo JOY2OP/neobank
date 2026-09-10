@@ -163,3 +163,7 @@ Table:
 ## [T+36h] LITHIC SANDBOX TERMINAL
 - Put merchant-side test controls in Ops, not in the customer ACH payment form. Ops selects a specific employee card, authorization, or settlement for each Lithic sandbox step.
 - Keep employee ownership in Corgi and the Lithic card memo while this sandbox uses Lithic's default program account; do not introduce a second account-holder/KYC flow.
+
+
+## [T+46h] LITHIC SANDBOX TERMINAL NOT WORKING IN OPS
+- Enabling charging via card, authorization, settlement and reversal
